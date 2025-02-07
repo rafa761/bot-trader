@@ -163,7 +163,8 @@ cython_debug/
 .idea/**/dictionaries
 .idea/**/shelf
 .idea/**/misc.xml
-.idea/sense-hub.iml
+.idea/bot-trader.iml
+.idea/vcs.xml
 
 # Generated files
 .idea/**/contentModel.xml
@@ -403,3 +404,4 @@ dist
 
 megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
+
