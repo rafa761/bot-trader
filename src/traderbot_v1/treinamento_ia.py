@@ -1,9 +1,11 @@
+from pathlib import Path
 import os
 import pandas as pd
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
 import logging
+import logging.handlers
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
@@ -18,8 +20,8 @@ import ta
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
 
-API_KEY ='vEXmhiuKEoKPMJBVSYnejP0PYKQfkzGCMB2yM9qIn4W3kmlTc1MSfGQT0V1VHseK'
-API_SECRET = 'h7mzLHYCsVv0qshySmGaQoKFBZaKTEob56QnheGmJI5sQSxAwojUywpQVvFo5BGf'
+API_KEY = os.environ.get('BINANCE_API_KEY')
+API_SECRET = os.environ.get('BINANCE_API_SECRET')
 
 # Verificar se as chaves de API foram definidas
 if not API_KEY or not API_SECRET:
@@ -33,10 +35,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("training_bot.log"),
+        logging.handlers.RotatingFileHandler('logs/training_bot.log', maxBytes=5*1024*1024, backupCount=5),
         logging.StreamHandler()
     ]
 )
+
+# Define o diretório onde os arquivos serão salvos
+train_data_dir = Path('train_data')
+
+# Cria o diretório se ele não existir
+train_data_dir.mkdir(parents=True, exist_ok=True)
+
 
 # ---------------------------- Funções Auxiliares ----------------------------
 
@@ -193,7 +202,7 @@ def train_model(X_train, y_train, model_name):
         logging.info(f"Iniciando treinamento do modelo para {model_name}.")
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
-        joblib.dump(model, f'model_{model_name}.pkl')
+        joblib.dump(model, train_data_dir / f'model_{model_name}.pkl')
         logging.info(f"Modelo para {model_name} treinado e salvo como model_{model_name}.pkl.")
         return model
     except Exception as e:
@@ -268,9 +277,11 @@ def main():
     
     # 8. Salvar scalers
     try:
-        joblib.dump(scaler_X, 'scaler_X.pkl')
-        joblib.dump(scaler_y_tp, 'scaler_y_tp.pkl')
-        joblib.dump(scaler_y_sl, 'scaler_y_sl.pkl')
+        # Salva os scalers usando joblib
+        joblib.dump(scaler_X, train_data_dir / 'scaler_X.pkl')
+        joblib.dump(scaler_y_tp, train_data_dir / 'scaler_y_tp.pkl')
+        joblib.dump(scaler_y_sl, train_data_dir / 'scaler_y_sl.pkl')
+
         logging.info("Scalers salvos como scaler_X.pkl, scaler_y_tp.pkl e scaler_y_sl.pkl.")
     except Exception as e:
         logging.error(f"Erro ao salvar scalers: {e}")

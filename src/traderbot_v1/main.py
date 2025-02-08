@@ -60,8 +60,8 @@ logging.basicConfig(
 )
 
 # Carregar as chaves de API do arquivo .env
-API_KEY ='b5361ba39e9ba47bcdc7976ca427714d2dd32544755b9bbffd0e50313cb905ef'
-API_SECRET = '80837417a3f7ec3a27be068c62496bee78a11bc9c2c023a848d657a579a67094'
+API_KEY = os.environ.get('BINANCE_API_KEY_TESTNET')
+API_SECRET = os.environ.get('BINANCE_API_SECRET_TESTNET')
 
 # Verificar se as chaves de API foram definidas
 if not API_KEY or not API_SECRET:

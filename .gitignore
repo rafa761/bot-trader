@@ -165,6 +165,7 @@ cython_debug/
 .idea/**/misc.xml
 .idea/bot-trader.iml
 .idea/vcs.xml
+.idea/git_toolbox_prj.xml
 
 # Generated files
 .idea/**/contentModel.xml
@@ -405,3 +406,7 @@ dist
 megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
+/src/traderbot_v1/train_data/
+
+# Arquivos de treinamento Machine learning
+*.pkl
