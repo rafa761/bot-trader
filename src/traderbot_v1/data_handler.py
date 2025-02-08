@@ -1,5 +1,6 @@
 # data_handler.py
 
+import numpy as np
 import pandas as pd
 import requests
 import ta
@@ -39,11 +40,27 @@ class DataHandler:
             df['macd'] = ta.trend.macd_diff(df['close'])
             df['bollinger_hband'] = ta.volatility.bollinger_hband(df['close'], window=20)
             df['bollinger_lband'] = ta.volatility.bollinger_lband(df['close'], window=20)
+            df['atr'] = self.calculate_atr(df, window=14)
             df.dropna(inplace=True)
             return df
         except Exception as e:
             logger.error(f"Erro ao calcular indicadores técnicos: {e}", exc_info=True)
             return df
+
+    @staticmethod
+    def calculate_atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
+        """
+        Calcula o indicador Average True Range (ATR).
+
+        :param df: DataFrame contendo os dados de preços.
+        :param window: Período da média móvel.
+        :return: Série com os valores do ATR.
+        """
+        high_low = df['high'] - df['low']
+        high_close = np.abs(df['high'] - df['close'].shift())
+        low_close = np.abs(df['low'] - df['close'].shift())
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return true_range.rolling(window=window).mean()
 
     def get_latest_data(self, symbol: str = 'BTCUSDT', interval: str = '1m', limit: int = 5000) -> pd.DataFrame:
         """
