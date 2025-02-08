@@ -405,3 +405,4 @@ dist
 megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
+/src/traderbot_v1/train_data/

@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import pandas as pd
 from binance.client import Client
@@ -268,9 +269,17 @@ def main():
     
     # 8. Salvar scalers
     try:
-        joblib.dump(scaler_X, 'scaler_X.pkl')
-        joblib.dump(scaler_y_tp, 'scaler_y_tp.pkl')
-        joblib.dump(scaler_y_sl, 'scaler_y_sl.pkl')
+        # Define o diretório onde os arquivos serão salvos
+        train_data_dir = Path('train_data')
+
+        # Cria o diretório se ele não existir
+        train_data_dir.mkdir(parents=True, exist_ok=True)
+
+        # Salva os scalers usando joblib
+        joblib.dump(scaler_X, train_data_dir / 'scaler_X.pkl')
+        joblib.dump(scaler_y_tp, train_data_dir / 'scaler_y_tp.pkl')
+        joblib.dump(scaler_y_sl, train_data_dir / 'scaler_y_sl.pkl')
+
         logging.info("Scalers salvos como scaler_X.pkl, scaler_y_tp.pkl e scaler_y_sl.pkl.")
     except Exception as e:
         logging.error(f"Erro ao salvar scalers: {e}")
