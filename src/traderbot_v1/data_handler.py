@@ -1,31 +1,35 @@
 # data_handler.py
 
-import time
-import math
-import requests
 import pandas as pd
-import numpy as np
-from datetime import datetime
-from binance.exceptions import BinanceAPIException
-from logger import logger
-from config import SMA_WINDOW_SHORT, SMA_WINDOW_LONG
+import requests
 import ta
+from binance.exceptions import BinanceAPIException
+
+from binance_client import BinanceClientService
+from config import SMA_WINDOW_SHORT, SMA_WINDOW_LONG
+from logger import logger
+
 
 class DataHandler:
     """
     Classe responsável por gerenciar dados históricos e cálculo de indicadores.
     """
 
-    def __init__(self, binance_service):
+    def __init__(self, binance_service: BinanceClientService) -> None:
         """
-        binance_service: instância de BinanceClientService
+        Inicializa a instância do DataHandler.
+
+        :param binance_service: Instância de BinanceClientService para interagir com a Binance.
         """
         self.binance_service = binance_service
-        self.historical_df = pd.DataFrame()
+        self.historical_df: pd.DataFrame = pd.DataFrame()
 
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Adiciona indicadores técnicos ao DataFrame fornecido.
+
+        :param df: DataFrame contendo os dados de preços.
+        :return: DataFrame atualizado com os indicadores técnicos.
         """
         logger.info("Calculando indicadores técnicos usando 'ta'")
         try:
@@ -41,9 +45,14 @@ class DataHandler:
             logger.error(f"Erro ao calcular indicadores técnicos: {e}", exc_info=True)
             return df
 
-    def get_latest_data(self, symbol='BTCUSDT', interval='1m', limit=5000):
+    def get_latest_data(self, symbol: str = 'BTCUSDT', interval: str = '1m', limit: int = 5000) -> pd.DataFrame:
         """
         Coleta dados históricos mais recentes da Binance Futures Testnet.
+
+        :param symbol: Símbolo do ativo a ser consultado.
+        :param interval: Intervalo de tempo dos candles.
+        :param limit: Quantidade máxima de registros a serem coletados.
+        :return: DataFrame contendo os dados coletados.
         """
         logger.info(f"Coletando {limit} dados mais recentes para {symbol} com intervalo {interval}")
         client = self.binance_service.client  # Acessa diretamente o client
@@ -97,9 +106,11 @@ class DataHandler:
             logger.error(f"Erro ao coletar dados: {e}", exc_info=True)
             return pd.DataFrame()
 
-    def update_historical_df(self, new_row: dict):
+    def update_historical_df(self, new_row: dict[str, float]) -> None:
         """
         Atualiza o DataFrame histórico com um novo candle.
+
+        :param new_row: Dicionário contendo os dados do novo candle.
         """
         temp_df = pd.DataFrame([new_row])
         self.historical_df = pd.concat([self.historical_df, temp_df], ignore_index=True)
@@ -107,9 +118,11 @@ class DataHandler:
         # Recalcula indicadores
         self.historical_df = self.add_technical_indicators(self.historical_df)
 
-    def get_current_features(self):
+    def get_current_features(self) -> pd.DataFrame:
         """
         Retorna a última linha de indicadores calculados, se existir.
+
+        :return: DataFrame contendo os últimos valores dos indicadores técnicos.
         """
         if not self.historical_df.empty:
             return self.historical_df.tail(1)[

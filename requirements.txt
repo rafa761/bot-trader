@@ -14,3 +14,4 @@ nltk==3.9.1
 scikit-learn==1.6.1
 xgboost==2.1.4
 schedule==1.2.2
+nltk==3.9.1
