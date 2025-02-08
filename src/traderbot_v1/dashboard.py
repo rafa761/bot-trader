@@ -6,6 +6,8 @@ import plotly.graph_objs as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
+from logger import memory_logger
+
 
 def create_dashboard(trading_bot):
     """
@@ -23,10 +25,15 @@ def create_dashboard(trading_bot):
         average_profit = trading_bot.trade_results['profit'].mean()
         return total_profit, win_rate, average_profit
 
+    # ========= Layout =========
     app.layout = dbc.Container([
         dbc.Row([
-            dbc.Col(html.H1('Dashboard de Trading com IA',
-                            className='text-center text-primary mb-4'), width=12)
+            dbc.Col(
+                html.H1(
+                    'Dashboard de Trading com IA',
+                    className='text-center text-primary mb-4'
+                ), width=12
+            )
         ]),
 
         dbc.Row([
@@ -58,7 +65,31 @@ def create_dashboard(trading_bot):
                 dcc.Graph(id='trades-history-graph')
             ], width=12),
         ]),
+
+        # -----------------------------
+        # SEÇÃO: Logs do Console
+        # -----------------------------
+        dbc.Row([
+            dbc.Col([
+                html.H3('Logs do Console'),
+                dcc.Interval(id='log-interval', interval=5000, n_intervals=0),
+
+                html.Div(
+                    id='log-output',
+                    style={
+                        'whiteSpace': 'pre-wrap',
+                        'height': '300px',
+                        'overflowY': 'scroll',
+                        'backgroundColor': '#f8f9fa',
+                        'border': '1px solid #ced4da',
+                        'padding': '10px'
+                    }
+                )
+            ], width=12),
+        ]),
     ], fluid=True)
+
+    # ========= Callbacks =========
 
     @app.callback(
         Output('performance-metrics', 'children'),
@@ -182,5 +213,71 @@ def create_dashboard(trading_bot):
                 yaxis_title='Preço'
             )
             return fig
+
+    # ====== CALLBACK: para exibir logs no Div 'log-output' ======
+    @app.callback(
+        Output('log-output', 'children'),
+        [Input('log-interval', 'n_intervals')]
+    )
+    def update_log_output(n):
+        """
+        Retorna as últimas linhas do nosso logger em memória,
+        estilizadas conforme o nível do log (INFO, WARNING, ERROR, etc.).
+        """
+
+        # 1) Obtém todas as linhas do logger em memória
+        lines = memory_logger.get_logs()
+
+        # 2) Definimos um dict de estilos e emojis por nível
+        log_styles = {
+            'DEBUG': {'emoji': '🔎', 'color': '#6c757d'},  # cinza
+            'INFO': {'emoji': 'ℹ️', 'color': '#000000'},  # preto
+            'WARNING': {'emoji': '⚠️', 'color': 'orange'},
+            'ERROR': {'emoji': '🛑', 'color': 'red'},
+            'CRITICAL': {'emoji': '💥', 'color': 'red'},
+        }
+
+        def parse_log_level(line):
+            """Tenta identificar o nível de log na string formatada."""
+            if ' - ERROR - ' in line:
+                return 'ERROR'
+            elif ' - WARNING - ' in line:
+                return 'WARNING'
+            elif ' - INFO - ' in line:
+                return 'INFO'
+            elif ' - DEBUG - ' in line:
+                return 'DEBUG'
+            elif ' - CRITICAL - ' in line:
+                return 'CRITICAL'
+            else:
+                return 'INFO'
+
+        # 3) Para cada linha, identificamos nível e geramos um componente html.Div
+        styled_logs = []
+        for line in lines:
+            level = parse_log_level(line)
+            style_info = log_styles.get(level, log_styles['INFO'])
+
+            # Exemplo: substituindo parte do prefixo para ficar mais limpo
+            # mas você pode apenas manter a linha inteira
+            # line sem mudança: f"{style_info['emoji']} {line}"
+            # ou processar datas, etc.
+
+            # Aqui, vamos exibir:
+            # [EMOJI] 2023-10-10 10:10:10,999 - LEVEL - Mensagem...
+            styled_logs.append(
+                html.Div(
+                    f"{style_info['emoji']} {line}",
+                    style={
+                        'color': style_info['color'],
+                        'fontFamily': 'monospace',
+                        'fontSize': '12px',
+                        'marginBottom': '2px'
+                    }
+                )
+            )
+
+        # Retornamos uma lista de Divs, cada um representando uma linha
+        return styled_logs
 
     return app
