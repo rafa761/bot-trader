@@ -1,0 +1,119 @@
+# data_handler.py
+
+import time
+import math
+import requests
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from binance.exceptions import BinanceAPIException
+from logger import logger
+from config import SMA_WINDOW_SHORT, SMA_WINDOW_LONG
+import ta
+
+class DataHandler:
+    """
+    Classe responsável por gerenciar dados históricos e cálculo de indicadores.
+    """
+
+    def __init__(self, binance_service):
+        """
+        binance_service: instância de BinanceClientService
+        """
+        self.binance_service = binance_service
+        self.historical_df = pd.DataFrame()
+
+    def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Adiciona indicadores técnicos ao DataFrame fornecido.
+        """
+        logger.info("Calculando indicadores técnicos usando 'ta'")
+        try:
+            df['sma_short'] = ta.trend.sma_indicator(df['close'], window=SMA_WINDOW_SHORT)
+            df['sma_long'] = ta.trend.sma_indicator(df['close'], window=SMA_WINDOW_LONG)
+            df['rsi'] = ta.momentum.rsi(df['close'], window=14)
+            df['macd'] = ta.trend.macd_diff(df['close'])
+            df['bollinger_hband'] = ta.volatility.bollinger_hband(df['close'], window=20)
+            df['bollinger_lband'] = ta.volatility.bollinger_lband(df['close'], window=20)
+            df.dropna(inplace=True)
+            return df
+        except Exception as e:
+            logger.error(f"Erro ao calcular indicadores técnicos: {e}", exc_info=True)
+            return df
+
+    def get_latest_data(self, symbol='BTCUSDT', interval='1m', limit=5000):
+        """
+        Coleta dados históricos mais recentes da Binance Futures Testnet.
+        """
+        logger.info(f"Coletando {limit} dados mais recentes para {symbol} com intervalo {interval}")
+        client = self.binance_service.client  # Acessa diretamente o client
+
+        try:
+            max_limit_per_call = 1500
+            data = []
+            endTime = None
+            while limit > 0:
+                current_limit = min(limit, max_limit_per_call)
+                params = {
+                    'symbol': symbol,
+                    'interval': interval,
+                    'limit': current_limit
+                }
+                if endTime:
+                    params['endTime'] = endTime
+                klines = client.futures_klines(**params)
+                logger.info(f"Linhas retornadas nesta chamada: {len(klines)}")
+                if not klines:
+                    break
+                data.extend(klines)
+                limit -= current_limit
+                endTime = klines[0][0] - 1  # Pega o primeiro kline para buscar dados anteriores
+
+            df = pd.DataFrame(data, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ])
+            df['open'] = pd.to_numeric(df['open'], errors='coerce')
+            df['high'] = pd.to_numeric(df['high'], errors='coerce')
+            df['low'] = pd.to_numeric(df['low'], errors='coerce')
+            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.dropna(inplace=True)
+            df.sort_values('timestamp', inplace=True)
+
+            logger.info(f"Dados mais recentes de {symbol} coletados com sucesso")
+            self.historical_df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            return self.historical_df
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout ao coletar dados.")
+            return pd.DataFrame()
+        except BinanceAPIException as e:
+            logger.error(f"Erro da API da Binance: {e}")
+            return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Erro ao coletar dados: {e}", exc_info=True)
+            return pd.DataFrame()
+
+    def update_historical_df(self, new_row: dict):
+        """
+        Atualiza o DataFrame histórico com um novo candle.
+        """
+        temp_df = pd.DataFrame([new_row])
+        self.historical_df = pd.concat([self.historical_df, temp_df], ignore_index=True)
+        self.historical_df.drop_duplicates(subset='timestamp', keep='last', inplace=True)
+        # Recalcula indicadores
+        self.historical_df = self.add_technical_indicators(self.historical_df)
+
+    def get_current_features(self):
+        """
+        Retorna a última linha de indicadores calculados, se existir.
+        """
+        if not self.historical_df.empty:
+            return self.historical_df.tail(1)[
+                ['sma_short', 'sma_long', 'rsi', 'macd', 'bollinger_hband', 'bollinger_lband']
+            ]
+        else:
+            return pd.DataFrame()

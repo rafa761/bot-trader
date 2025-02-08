@@ -406,7 +406,8 @@ dist
 megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
-/src/traderbot_v1/train_data/
+/src/**/train_data/
+/src/**/perf_metric_data/
 
 # Arquivos de treinamento Machine learning
 *.pkl
