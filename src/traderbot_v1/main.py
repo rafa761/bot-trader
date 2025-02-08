@@ -2,11 +2,14 @@
 
 import sys
 import threading
+
 from binance import ThreadedWebsocketManager
+
 from config import API_KEY, API_SECRET
+from dashboard import create_dashboard
 from logger import logger
 from trading_bot import TradingBot
-from dashboard import create_dashboard
+
 
 def main():
     symbol = 'BTCUSDT'
@@ -42,7 +45,7 @@ def main():
 
     # Thread do bot (aprendizado online + trading)
     trading_thread = threading.Thread(
-        target=bot.online_learning_and_trading, 
+        target=bot.online_learning_and_trading,
         daemon=True
     )
     trading_thread.start()
@@ -50,6 +53,7 @@ def main():
     # Inicia o Dashboard
     app = create_dashboard(bot)
     app.run_server(debug=False, use_reloader=False)
+
 
 if __name__ == '__main__':
     main()

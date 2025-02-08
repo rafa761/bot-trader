@@ -1,19 +1,18 @@
-from pathlib import Path
+import logging
+import logging.handlers
 import os
+from pathlib import Path
+
+import joblib
 import pandas as pd
+import ta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from dotenv import load_dotenv
-import logging
-import logging.handlers
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
-import joblib
-from datetime import datetime
-import time
-import ta
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 # ---------------------------- Configuração Inicial ----------------------------
 
@@ -35,7 +34,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.handlers.RotatingFileHandler('logs/training_bot.log', maxBytes=5*1024*1024, backupCount=5),
+        logging.handlers.RotatingFileHandler('logs/training_bot.log', maxBytes=5 * 1024 * 1024, backupCount=5),
         logging.StreamHandler()
     ]
 )
@@ -73,6 +72,7 @@ def get_historical_klines(symbol, interval, start_str, end_str=None):
         logging.error(f"Erro inesperado ao coletar dados históricos: {e}")
         return pd.DataFrame()
 
+
 def add_technical_indicators(df):
     """
     Adiciona indicadores técnicos ao DataFrame.
@@ -82,13 +82,14 @@ def add_technical_indicators(df):
         # Média Móvel Simples (curta e longa)
         df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
         df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
-        
+
         # Índice de Força Relativa (RSI)
         df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
-        
+
         # Average True Range (ATR)
-        df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
-        
+        df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'],
+                                                   window=14).average_true_range()
+
         # Remove linhas com valores NaN
         df.dropna(inplace=True)
         logging.info("Indicadores técnicos adicionados com sucesso.")
@@ -96,6 +97,7 @@ def add_technical_indicators(df):
     except Exception as e:
         logging.error(f"Erro ao adicionar indicadores técnicos: {e}")
         return df
+
 
 def create_labels(df, horizon=12):
     """
@@ -109,16 +111,16 @@ def create_labels(df, horizon=12):
         logging.info(f"Criando labels para TP e SL com horizon={horizon} períodos.")
         df['future_high'] = df['high'].rolling(window=horizon).max().shift(-horizon)
         df['future_low'] = df['low'].rolling(window=horizon).min().shift(-horizon)
-        
+
         # Definir TP como o percentual de aumento até o máximo futuro
         df['TP_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
-        
+
         # Definir SL como o percentual de queda até o mínimo futuro
         df['SL_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
-        
+
         # Remover colunas auxiliares
         df.drop(['future_high', 'future_low'], axis=1, inplace=True)
-        
+
         # Remover linhas com NaN
         df.dropna(inplace=True)
         logging.info("Labels para TP e SL criados com sucesso.")
@@ -126,6 +128,7 @@ def create_labels(df, horizon=12):
     except Exception as e:
         logging.error(f"Erro ao criar labels: {e}")
         return df
+
 
 def preprocess_data(df, feature_columns):
     """
@@ -140,29 +143,30 @@ def preprocess_data(df, feature_columns):
         X = df[feature_columns]
         y_tp = df['TP_pct']
         y_sl = df['SL_pct']
-        
+
         # Inicializar os scalers
         scaler_X = StandardScaler()
         scaler_y_tp = StandardScaler()
         scaler_y_sl = StandardScaler()
-        
+
         # Ajustar e transformar as features
         X_scaled = scaler_X.fit_transform(X)
-        
+
         # Ajustar e transformar os labels
         y_tp_scaled = scaler_y_tp.fit_transform(y_tp.values.reshape(-1, 1)).flatten()
         y_sl_scaled = scaler_y_sl.fit_transform(y_sl.values.reshape(-1, 1)).flatten()
-        
+
         # Concatenar as features e labels em um novo DataFrame
         data_scaled = pd.DataFrame(X_scaled, columns=feature_columns, index=df.index)
         data_scaled['TP_pct'] = y_tp_scaled
         data_scaled['SL_pct'] = y_sl_scaled
-        
+
         logging.info("Pré-processamento concluído com sucesso.")
         return scaler_X, scaler_y_tp, scaler_y_sl, data_scaled
     except Exception as e:
         logging.error(f"Erro no pré-processamento dos dados: {e}")
         return None, None, None, df
+
 
 def split_data(data_scaled, feature_columns, test_size=0.2):
     """
@@ -178,16 +182,17 @@ def split_data(data_scaled, feature_columns, test_size=0.2):
         X = data_scaled[feature_columns]
         y_tp = data_scaled['TP_pct']
         y_sl = data_scaled['SL_pct']
-        
+
         # Dividir os dados em treino e teste
         X_train, X_test, y_tp_train, y_tp_test = train_test_split(X, y_tp, test_size=test_size, shuffle=False)
         _, _, y_sl_train, y_sl_test = train_test_split(X, y_sl, test_size=test_size, shuffle=False)
-        
+
         logging.info("Divisão dos dados concluída.")
         return X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test
     except Exception as e:
         logging.error(f"Erro ao dividir os dados: {e}")
         return None, None, None, None, None, None
+
 
 def train_model(X_train, y_train, model_name):
     """
@@ -209,6 +214,7 @@ def train_model(X_train, y_train, model_name):
         logging.error(f"Erro ao treinar o modelo para {model_name}: {e}")
         return None
 
+
 def evaluate_model(model, X_test, y_test, model_name):
     """
     Avalia o modelo usando o conjunto de teste.
@@ -229,6 +235,7 @@ def evaluate_model(model, X_test, y_test, model_name):
         logging.error(f"Erro ao avaliar o modelo para {model_name}: {e}")
         return None
 
+
 # ---------------------------- Fluxo Principal ----------------------------
 
 def main():
@@ -238,43 +245,43 @@ def main():
     start_date = '1 Jan, 2020'  # Data de início
     horizon = 12  # Número de períodos futuros para definir TP e SL (15m * 12 = 3 horas)
     feature_columns = ['sma_short', 'sma_long', 'rsi', 'atr', 'volume']
-    
+
     # 1. Coletar dados históricos
     df = get_historical_klines(symbol, interval, start_date)
     if df.empty:
         logging.error("Não foi possível coletar dados históricos. Encerrando o script.")
         return
-    
+
     # 2. Adicionar indicadores técnicos
     df = add_technical_indicators(df)
-    
+
     # 3. Criar labels para TP e SL
     df = create_labels(df, horizon)
-    
+
     # 4. Pré-processar os dados
     scaler_X, scaler_y_tp, scaler_y_sl, data_scaled = preprocess_data(df, feature_columns)
     if data_scaled is None:
         logging.error("Pré-processamento falhou. Encerrando o script.")
         return
-    
+
     # 5. Dividir os dados em treino e teste
     X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test = split_data(data_scaled, feature_columns)
     if X_train is None:
         logging.error("Divisão dos dados falhou. Encerrando o script.")
         return
-    
+
     # 6. Treinar modelos
     model_tp = train_model(X_train, y_tp_train, 'tp')
     model_sl = train_model(X_train, y_sl_train, 'sl')
-    
+
     if model_tp is None or model_sl is None:
         logging.error("Treinamento dos modelos falhou. Encerrando o script.")
         return
-    
+
     # 7. Avaliar modelos
     mae_tp = evaluate_model(model_tp, X_test, y_tp_test, 'tp')
     mae_sl = evaluate_model(model_sl, X_test, y_sl_test, 'sl')
-    
+
     # 8. Salvar scalers
     try:
         # Salva os scalers usando joblib
@@ -285,8 +292,9 @@ def main():
         logging.info("Scalers salvos como scaler_X.pkl, scaler_y_tp.pkl e scaler_y_sl.pkl.")
     except Exception as e:
         logging.error(f"Erro ao salvar scalers: {e}")
-    
+
     logging.info("Processo de treinamento concluído com sucesso.")
+
 
 if __name__ == "__main__":
     main()

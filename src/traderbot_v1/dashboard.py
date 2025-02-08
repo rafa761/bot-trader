@@ -2,10 +2,10 @@
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import dcc, html
 import plotly.graph_objs as go
+from dash import dcc, html
 from dash.dependencies import Input, Output
-from threading import Lock
+
 
 def create_dashboard(trading_bot):
     """
