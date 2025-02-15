@@ -52,6 +52,8 @@ class TradingBot:
 
         self.last_position = None
 
+        logger.info("classe TradingBot inicializada com sucesso.")
+
     async def initialize_filters(self) -> None:
         """
         Inicializa os filtros (tickSize e stepSize) e tenta ajustar alavancagem

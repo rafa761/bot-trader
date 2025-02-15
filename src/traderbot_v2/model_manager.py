@@ -32,6 +32,7 @@ class ModelManager:
         :param model_tp_path: Caminho do arquivo pkl do modelo TP
         :param model_sl_path: Caminho do arquivo pkl do modelo SL
         """
+        logger.info("Iniciando classe ModelManager")
         self.pipeline_tp: Pipeline | None = None
         self.pipeline_sl: Pipeline | None = None
 

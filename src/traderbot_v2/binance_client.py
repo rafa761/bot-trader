@@ -26,11 +26,14 @@ class BinanceClient:
         Construtor que inicializa o client do Binance a partir das configurações.
         Utiliza a rede de teste (testnet=True) para Futuros.
         """
+        logger.info("Iniciando client da Binance...")
         self.client = Client(
             api_key=config.BINANCE_API_KEY_TESTNET,
             api_secret=config.BINANCE_API_SECRET_TESTNET,
             testnet=True
         )
+        logger.info("Client da Binance iniciado")
+
 
     def set_leverage(self, symbol: str, leverage: int) -> None:
         """

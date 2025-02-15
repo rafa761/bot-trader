@@ -31,6 +31,7 @@ class DataHandler:
 
         :param binance_client: Instância do cliente da Binance
         """
+        logger.info("Iniciando classe de DataHandler...")
         self.client = binance_client
         self.historical_df = pd.DataFrame()
         self.data_lock = threading.Lock()

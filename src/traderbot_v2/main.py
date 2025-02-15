@@ -20,17 +20,21 @@ def main() -> None:
     Função principal que inicializa o TradingBot, a aplicação Dash,
     e mantém o fluxo de execução.
     """
+    logger.info("Iniciando TradingBot..aguarde")
     bot = TradingBot()
 
     # Inicia WebSocket Manager (caso queira receber dados via stream, etc.)
+    logger.info("Iniciando WebsocketManager...")
     twm = ThreadedWebsocketManager(
         api_key=bot.binance_client.client.API_KEY,
         api_secret=bot.binance_client.client.API_SECRET,
         testnet=True
     )
     twm.start()
+    logger.info("WebsocketManager iniciado com sucesso.")
 
     # Cria o dashboard
+    logger.info("Iniciando Dashboard...")
     dashboard_app = create_dashboard(bot.data_handler)
 
     # Executa o Dash em thread separada
@@ -40,6 +44,7 @@ def main() -> None:
         daemon=True
     )
     dash_thread.start()
+    logger.info("Dashboard iniciado com sucesso")
 
     try:
         logger.info("Bot iniciado")
