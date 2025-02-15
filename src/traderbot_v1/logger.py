@@ -1,11 +1,10 @@
 # logger.py
 
 import logging.handlers
-import os
+from pathlib import Path
 
-if not os.path.exists('logs'):
-    os.makedirs('logs')
-
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
 
 class InMemoryLogger(logging.Handler):
     def __init__(self, capacity=5000):
@@ -14,7 +13,6 @@ class InMemoryLogger(logging.Handler):
         self.records = []
 
     def emit(self, record):
-        # Usando self.format(record) que depende de ter um Formatter setado
         formatted = self.format(record)
         self.records.append(formatted)
         # Se ultrapassar o limite, descarta o mais antigo
@@ -38,7 +36,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.handlers.RotatingFileHandler(
-            'logs/trading_app.log',
+            logs_dir / 'trading_app.log',
             maxBytes=5 * 1024 * 1024,
             backupCount=5
         ),
