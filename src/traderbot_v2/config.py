@@ -1,8 +1,8 @@
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
 from dotenv import load_dotenv
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 load_dotenv()
 

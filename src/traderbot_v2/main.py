@@ -5,14 +5,14 @@ Módulo principal que faz a integração final, iniciando o bot de trading
 e a aplicação Dash.
 """
 
-import threading
 import asyncio
+import threading
 
 from binance import ThreadedWebsocketManager
 
-from trading_bot import TradingBot
 from dashboard import create_dashboard
 from logger import logger
+from trading_bot import TradingBot
 
 
 def main() -> None:

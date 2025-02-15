@@ -8,20 +8,15 @@ Lida com a criação de ordens, registro de trades e todo o fluxo assíncrono.
 
 import asyncio
 import sys
-import threading
-import time
 
 import pandas as pd
 
-from binance import ThreadedWebsocketManager
-from binance.exceptions import BinanceAPIException
-
+from binance_client import BinanceClient
+from config import config
 from data_handler import DataHandler
+from logger import logger
 from model_manager import ModelManager
 from trading_strategy import TradingStrategy
-from binance_client import BinanceClient
-from logger import logger
-from config import config
 
 
 class TradingBot:
@@ -158,7 +153,7 @@ class TradingBot:
                         last_row["boll_lband"],
                         last_row["atr"]
                     ]],
-                    columns=["sma_short", "sma_long", "rsi", "macd", "boll_hband", "boll_lband", "atr"])
+                        columns=["sma_short", "sma_long", "rsi", "macd", "boll_hband", "boll_lband", "atr"])
 
                     predicted_tp_pct, predicted_sl_pct = self.model_manager.predict_tp_sl(X_eval)
                     logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
@@ -214,11 +209,11 @@ class TradingBot:
             await asyncio.sleep(5)
 
     def place_tp_sl(
-        self,
-        direction: str,
-        current_price: float,
-        tp_price: float,
-        sl_price: float
+            self,
+            direction: str,
+            current_price: float,
+            tp_price: float,
+            sl_price: float
     ) -> None:
         """
         Cria ordens de TAKE_PROFIT e STOP_MARKET de acordo com a direção

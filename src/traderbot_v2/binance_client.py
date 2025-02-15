@@ -6,13 +6,12 @@ relacionados (ordens, preços, posições, etc.).
 """
 
 import time
-import math
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from logger import logger
 from config import config
+from logger import logger
 
 
 class BinanceClient:
@@ -91,8 +90,8 @@ class BinanceClient:
             positions = self.client.futures_position_information(symbol=symbol)
             for pos in positions:
                 if (
-                    pos["positionSide"].upper() == desired_side.upper()
-                    and float(pos["positionAmt"]) != 0.0
+                        pos["positionSide"].upper() == desired_side.upper()
+                        and float(pos["positionAmt"]) != 0.0
                 ):
                     return pos
             return None
@@ -101,13 +100,13 @@ class BinanceClient:
             return None
 
     def place_order_with_retry(
-        self,
-        symbol: str,
-        side: str,
-        quantity: float,
-        position_side: str,
-        step_size: float,
-        max_attempts: int = 3
+            self,
+            symbol: str,
+            side: str,
+            quantity: float,
+            position_side: str,
+            step_size: float,
+            max_attempts: int = 3
     ) -> dict | None:
         """
         Cria uma ordem MARKET com retentativas em caso de erro (ex.: margem insuficiente).

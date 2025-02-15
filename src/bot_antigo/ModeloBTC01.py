@@ -1,29 +1,26 @@
-import os
-import sys
-import math
 import asyncio
 import logging
 import logging.handlers
+import math
+import os
+import platform
+import sys
 import threading
 import time
-import platform
-import pandas as pd
-import numpy as np
-import ta
+
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-import plotly.graph_objs as go
 import dash_bootstrap_components as dbc
 import joblib
-from xgboost import XGBRegressor
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from binance.client import Client
-from binance import ThreadedWebsocketManager
-from binance.exceptions import BinanceAPIException
-from dotenv import load_dotenv
+import pandas as pd
+import plotly.graph_objs as go
 import requests
+import ta
+from binance import ThreadedWebsocketManager
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+from dash import dcc, html
+from dash.dependencies import Input, Output
+from dotenv import load_dotenv
 
 # -----------------------------------------------------------
 # 1. Configurações Iniciais
@@ -44,7 +41,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.handlers.RotatingFileHandler("logs/trading_app.log", maxBytes=5*1024*1024, backupCount=5),
+        logging.handlers.RotatingFileHandler("logs/trading_app.log", maxBytes=5 * 1024 * 1024, backupCount=5),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -63,6 +60,7 @@ risk_per_trade = 0.20  # 1%
 data_lock = threading.Lock()
 historical_df = pd.DataFrame()
 
+
 # -----------------------------------------------------------
 # 2. Funções Auxiliares
 # -----------------------------------------------------------
@@ -78,9 +76,11 @@ def get_symbol_filters(client, symbol):
             return tick_size, step_size
     return None, None
 
+
 def adjust_price_to_tick_size(price, tick_size):
     """Arredonda 'price' para baixo (floor) ao múltiplo do tick_size."""
     return math.floor(price / tick_size) * tick_size
+
 
 def format_price_for_tick_size(price, tick_size):
     """Formata 'price' com a quantidade correta de casas decimais baseada no tick_size."""
@@ -89,9 +89,11 @@ def format_price_for_tick_size(price, tick_size):
         decimals = len(str(tick_size).split('.')[-1])
     return f"{price:.{decimals}f}"
 
+
 def adjust_quantity_to_step_size(qty, step_size):
     """Arredonda 'qty' para o múltiplo do step_size."""
     return math.floor(qty / step_size) * step_size
+
 
 def format_quantity_for_step_size(qty, step_size):
     """Formata a quantidade com a precisão baseada no step_size."""
@@ -100,30 +102,34 @@ def format_quantity_for_step_size(qty, step_size):
         decimals = len(str(step_size).split('.')[-1])
     return f"{qty:.{decimals}f}"
 
+
 def calculate_trade_quantity(capital, current_price, leverage, risk_per_trade):
     """Calcula a quantidade de trade: (capital * risco) / current_price * leverage."""
     risk_amount = capital * risk_per_trade
     quantity = (risk_amount / current_price) * leverage
     return quantity
 
+
 def add_technical_indicators(df):
     """Adiciona indicadores técnicos usando a biblioteca 'ta'."""
     try:
         df["sma_short"] = ta.trend.sma_indicator(df["close"], window=5)
-        df["sma_long"]  = ta.trend.sma_indicator(df["close"], window=10)
-        df["rsi"]       = ta.momentum.rsi(df["close"], window=14)
-        df["macd"]      = ta.trend.macd_diff(df["close"])
+        df["sma_long"] = ta.trend.sma_indicator(df["close"], window=10)
+        df["rsi"] = ta.momentum.rsi(df["close"], window=14)
+        df["macd"] = ta.trend.macd_diff(df["close"])
         df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
         df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
 
         if len(df) >= 14:
-            df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14).average_true_range()
+            df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'],
+                                                       window=14).average_true_range()
 
         df.dropna(inplace=True)
         return df
     except Exception as e:
         logging.error(f"Erro ao calcular indicadores: {e}", exc_info=True)
         return df
+
 
 def update_historical_data(df, new_row):
     """Atualiza o DataFrame histórico com nova linha e recalcula indicadores."""
@@ -137,6 +143,7 @@ def update_historical_data(df, new_row):
     except Exception as e:
         logging.error(f"Erro ao atualizar histórico: {e}", exc_info=True)
         return df
+
 
 def get_open_position_by_side(symbol, desired_side):
     """
@@ -152,6 +159,7 @@ def get_open_position_by_side(symbol, desired_side):
     except Exception as e:
         logging.error(f"Erro ao checar posição para {desired_side}: {e}", exc_info=True)
         return None
+
 
 def place_order_with_retry(symbol, side, quantity, position_side, max_attempts=3):
     """
@@ -185,6 +193,7 @@ def place_order_with_retry(symbol, side, quantity, position_side, max_attempts=3
     logging.error("Não foi possível colocar a ordem após várias tentativas.")
     return None
 
+
 def get_futures_last_price(symbol):
     """Obtém o Last Price atual do ticker de Futuros."""
     try:
@@ -193,6 +202,7 @@ def get_futures_last_price(symbol):
     except Exception as e:
         logging.error(f"Erro ao obter last price: {e}")
         return 0.0
+
 
 # -----------------------------------------------------------
 # 3. Coleta de Dados Históricos (Futuros)
@@ -204,17 +214,18 @@ async def get_latest_data(symbol="BTCUSDT", interval="15", limit=1000):
         try:
             klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit)
             df = pd.DataFrame(klines, columns=[
-                "timestamp","open","high","low","close","volume",
-                "close_time","quote_asset_volume","number_of_trades",
-                "taker_buy_base_asset_volume","taker_buy_quote_asset_volume","ignore"
+                "timestamp", "open", "high", "low", "close", "volume",
+                "close_time", "quote_asset_volume", "number_of_trades",
+                "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
             ])
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df[["open","high","low","close","volume"]] = df[["open","high","low","close","volume"]].astype(float)
+            df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(
+                float)
             df.dropna(inplace=True)
             df.reset_index(drop=True, inplace=True)
-            return df[["timestamp","open","high","low","close","volume"]]
+            return df[["timestamp", "open", "high", "low", "close", "volume"]]
         except requests.exceptions.Timeout:
-            logging.warning(f"Timeout ao coletar dados, tentativa {attempt+1}")
+            logging.warning(f"Timeout ao coletar dados, tentativa {attempt + 1}")
             await asyncio.sleep(3)
         except BinanceAPIException as e:
             logging.error(f"Erro API Binance: {e}")
@@ -225,6 +236,7 @@ async def get_latest_data(symbol="BTCUSDT", interval="15", limit=1000):
         attempt += 1
     logging.error("Tentativas esgotadas. Não foi possível coletar dados.")
     return pd.DataFrame()
+
 
 # -----------------------------------------------------------
 # 4. Função Principal de Trading
@@ -256,7 +268,7 @@ async def online_learning_and_trading(symbol, interval, capital):
     logging.info(f"{symbol} -> tickSize={TICK_SIZE}, stepSize={STEP_SIZE}")
 
     global historical_df
-    
+
     while True:
         cycle_count += 1
 
@@ -278,13 +290,13 @@ async def online_learning_and_trading(symbol, interval, capital):
                             "volume": row["volume"]
                         }
                         historical_df = update_historical_data(historical_df, new_row)
-                        
+
         if (not model_initialized) or (cycle_count % training_interval == 0):
             with data_lock:
                 df_train = historical_df.copy()
             if len(df_train) >= 300:
                 df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
-                features = df_train[["sma_short","sma_long","rsi","macd","boll_hband","boll_lband","atr"]].copy()
+                features = df_train[["sma_short", "sma_long", "rsi", "macd", "boll_hband", "boll_lband", "atr"]].copy()
                 features.dropna(inplace=True)
                 target_tp = df_train["pct_change_next"].copy()
                 target_sl = df_train["pct_change_next"].copy()
@@ -336,7 +348,7 @@ async def online_learning_and_trading(symbol, interval, capital):
 
                 predicted_tp_pct = pipeline_tp.predict(X_eval)[0]
                 predicted_sl_pct = pipeline_sl.predict(X_eval)[0]
-                logging.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")  
+                logging.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
 
                 direction = None
                 if predicted_tp_pct > 0.2:
@@ -351,13 +363,13 @@ async def online_learning_and_trading(symbol, interval, capital):
 
                 if direction:
                     if direction == "LONG":
-                        tp_price = current_price * (1 + max(abs(predicted_tp_pct)/100, 0.02))
-                        sl_price = current_price * (1 - max(abs(predicted_sl_pct)/100, 0.02))
+                        tp_price = current_price * (1 + max(abs(predicted_tp_pct) / 100, 0.02))
+                        sl_price = current_price * (1 - max(abs(predicted_sl_pct) / 100, 0.02))
                         side = "BUY"
                         position_side = "LONG"
                     else:  # SHORT
-                        tp_price = current_price * (1 - max(abs(predicted_tp_pct)/100, 0.02))
-                        sl_price = current_price * (1 + max(abs(predicted_sl_pct)/100, 0.02))
+                        tp_price = current_price * (1 - max(abs(predicted_tp_pct) / 100, 0.02))
+                        sl_price = current_price * (1 + max(abs(predicted_sl_pct) / 100, 0.02))
                         side = "SELL"
                         position_side = "SHORT"
 
@@ -482,6 +494,7 @@ async def online_learning_and_trading(symbol, interval, capital):
 
             await asyncio.sleep(5)
 
+
 # -------------------------------------------------------------
 # 5. Dash para Visualização (Opcional)
 # -------------------------------------------------------------
@@ -492,6 +505,7 @@ app.layout = html.Div([
     dcc.Interval(id="interval-component", interval=60000, n_intervals=0),
     dcc.Graph(id="price-chart")
 ])
+
 
 @app.callback(Output("price-chart", "figure"),
               [Input("interval-component", "n_intervals")])
@@ -511,6 +525,7 @@ def update_graph(n):
     )])
     fig.update_layout(title=f"Histórico {symbol} (Testnet)", xaxis_rangeslider_visible=False)
     return fig
+
 
 # -------------------------------------------------------------
 # 6. Execução Principal

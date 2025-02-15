@@ -31,11 +31,11 @@ class TradingStrategy:
             return None
 
     def calculate_trade_quantity(
-        self,
-        capital: float,
-        current_price: float,
-        leverage: float,
-        risk_per_trade: float
+            self,
+            capital: float,
+            current_price: float,
+            leverage: float,
+            risk_per_trade: float
     ) -> float:
         """
         Calcula a quantidade a ser negociada:

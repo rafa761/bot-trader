@@ -1,6 +1,7 @@
 # trading_bot.py
 
 import os
+
 import certifi
 
 # Definir a variável de ambiente antes de importar outros módulos
@@ -20,20 +21,14 @@ import time
 from dotenv import load_dotenv
 import pandas as pd
 import ta  # Biblioteca para indicadores técnicos
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from xgboost import XGBRegressor  # Utilizando XGBoost
 import joblib
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import plotly.graph_objs as go
 import dash_bootstrap_components as dbc
-import math
 import requests
 import numpy as np
-import schedule
-import ssl
 
 # ---------------------------
 # 1. Configuração Inicial
@@ -54,18 +49,19 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.handlers.RotatingFileHandler('logs/trading_app.log', maxBytes=5*1024*1024, backupCount=5),
+        logging.handlers.RotatingFileHandler('logs/trading_app.log', maxBytes=5 * 1024 * 1024, backupCount=5),
         logging.StreamHandler()  # Também loga no console
     ]
 )
 
 # Carregar as chaves de API do arquivo .env
-API_KEY ='b5361ba39e9ba47bcdc7976ca427714d2dd32544755b9bbffd0e50313cb905ef'
+API_KEY = 'b5361ba39e9ba47bcdc7976ca427714d2dd32544755b9bbffd0e50313cb905ef'
 API_SECRET = '80837417a3f7ec3a27be068c62496bee78a11bc9c2c023a848d657a579a67094'
 
 # Verificar se as chaves de API foram definidas
 if not API_KEY or not API_SECRET:
-    logging.error("Chaves de API não encontradas. Por favor, defina as variáveis de ambiente 'BINANCE_API_KEY_TESTNET' e 'BINANCE_API_SECRET_TESTNET' no arquivo .env.")
+    logging.error(
+        "Chaves de API não encontradas. Por favor, defina as variáveis de ambiente 'BINANCE_API_KEY_TESTNET' e 'BINANCE_API_SECRET_TESTNET' no arquivo .env.")
     sys.exit(1)
 
 # Inicializar o cliente Binance para trading na Testnet
@@ -103,6 +99,7 @@ sma_window_long = 10
 
 daily_loss_limit = -0.02 * capital  # Limite de perda diária (por exemplo, 2% do capital)
 
+
 # ---------------------------
 # 4. Função para Adicionar Indicadores Técnicos
 # ---------------------------
@@ -125,6 +122,7 @@ def add_technical_indicators(df):
     except Exception as e:
         logging.error(f"Erro ao calcular indicadores técnicos: {e}", exc_info=True)
         return df
+
 
 # ---------------------------
 # 5. Função para Processar Mensagens do WebSocket
@@ -166,6 +164,7 @@ def handle_socket_message(msg):
                     logging.info("DataFrame histórico atualizado com indicadores técnicos.")
     except Exception as e:
         logging.error(f"Erro ao processar mensagem do WebSocket: {e}", exc_info=True)
+
 
 # ---------------------------
 # 6. Funções para Gerenciar Ordens e Resultados
@@ -219,7 +218,8 @@ def place_order(symbol, side, quantity, leverage):
             if e.code == -2019:  # Código de erro para margem insuficiente
                 logging.error(f"Erro da API da Binance ao colocar ordem: {e}")
                 attempt += 1
-                logging.warning(f"Tentativa de ajuste de margem insuficiente. Tentando novamente após {backoff_time} segundos...")
+                logging.warning(
+                    f"Tentativa de ajuste de margem insuficiente. Tentando novamente após {backoff_time} segundos...")
                 time.sleep(backoff_time)
                 backoff_time *= 2  # Aumentar o tempo de espera para o próximo backoff
                 continue
@@ -232,8 +232,10 @@ def place_order(symbol, side, quantity, leverage):
             return None
 
     # Se atingir o número máximo de tentativas, registrar o erro e parar as tentativas
-    logging.error("Número máximo de tentativas atingido. Não foi possível colocar a ordem devido à margem insuficiente.")
+    logging.error(
+        "Número máximo de tentativas atingido. Não foi possível colocar a ordem devido à margem insuficiente.")
     return None
+
 
 def save_trade_results():
     """
@@ -242,11 +244,13 @@ def save_trade_results():
     with data_lock:
         trade_results.to_csv('trade_results.csv', index=True)
 
+
 def save_performance_metrics():
     """
     Salva as métricas de desempenho em um arquivo CSV.
     """
     pd.DataFrame(performance_metrics).to_csv('performance_metrics.csv', index=True)
+
 
 # ---------------------------
 # 7. Função de Aprendizado Online e Trading Automático
@@ -311,7 +315,8 @@ def online_learning_and_trading(symbol, interval, capital):
                 logging.warning("historical_df está vazio. Aguardando próximo ciclo.")
                 time.sleep(1)
                 continue
-            current_features = historical_df.tail(1)[['sma_short', 'sma_long', 'rsi', 'macd', 'bollinger_hband', 'bollinger_lband']]
+            current_features = historical_df.tail(1)[
+                ['sma_short', 'sma_long', 'rsi', 'macd', 'bollinger_hband', 'bollinger_lband']]
             timestamp = datetime.now(timezone.utc)
             current_indicators = {
                 'sma_short': current_features['sma_short'].values[0],
@@ -355,7 +360,8 @@ def online_learning_and_trading(symbol, interval, capital):
         take_profit_price = real_price * (1 + predicted_tp_percent / 100)
         stop_loss_price = real_price * (1 - predicted_sl_percent / 100)
 
-        logging.info(f"Take-Profit previsto: {predicted_tp_percent:.2f}%, Valor de Take-Profit: {take_profit_price:.2f}")
+        logging.info(
+            f"Take-Profit previsto: {predicted_tp_percent:.2f}%, Valor de Take-Profit: {take_profit_price:.2f}")
         logging.info(f"Stop-Loss previsto: {predicted_sl_percent:.2f}%, Valor de Stop-Loss: {stop_loss_price:.2f}")
 
         # Condições para entrar em uma posição
@@ -576,7 +582,8 @@ def online_learning_and_trading(symbol, interval, capital):
                     profit = (entry_price - exit_price) * quantity * leverage
                     capital += profit
                     daily_profit += profit
-                    logging.info(f"Compra executada no Take-Profit: {quantity} {symbol} a {exit_price}, Lucro: {profit}")
+                    logging.info(
+                        f"Compra executada no Take-Profit: {quantity} {symbol} a {exit_price}, Lucro: {profit}")
                     # Salvar os resultados
                     results = {
                         'interval': interval,
@@ -707,6 +714,7 @@ def online_learning_and_trading(symbol, interval, capital):
             logging.info("Nenhum trade executado, aguardando próximo ciclo completo")
             time.sleep(1)
 
+
 # ---------------------------
 # 8. Função para Coletar Dados Históricos
 # ---------------------------
@@ -768,6 +776,7 @@ def get_latest_data(symbol='BTCUSDT', interval='1m', limit=5000):
         logging.error("Número máximo de tentativas atingido. Não foi possível coletar dados suficientes.")
         return pd.DataFrame()
 
+
 # ---------------------------
 # 9. Inicialização do WebSocket e Threads
 # ---------------------------
@@ -794,12 +803,14 @@ else:
 # Layout da Interface com Dash Bootstrap Components
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+
 # Calcular métricas de performance para exibir no dashboard
 def calculate_performance_metrics():
     total_profit = trade_results['profit'].sum()
     win_rate = (trade_results['profit'] > 0).mean()
     average_profit = trade_results['profit'].mean()
     return total_profit, win_rate, average_profit
+
 
 app.layout = dbc.Container([
     dbc.Row([
@@ -837,6 +848,7 @@ app.layout = dbc.Container([
     ]),
 ], fluid=True)
 
+
 # ---------------------------
 # 11. Callbacks do Dash
 # ---------------------------
@@ -856,6 +868,7 @@ def update_performance_metrics(n):
             html.P(f'Taxa de Sucesso: {win_rate:.2%}'),
             html.P(f'Lucro Médio por Trade: ${average_profit:.2f}'),
         ])
+
 
 # Callback para atualizar gráfico de previsão
 @app.callback(
@@ -885,6 +898,7 @@ def update_prediction_graph(n):
         figure.update_layout(title='Entradas e Saídas por Período Gráfico', xaxis_title='Data', yaxis_title='Preço')
         return figure
 
+
 # Callback para atualizar a tabela de trades
 @app.callback(
     Output('trade-table', 'children'),
@@ -896,8 +910,10 @@ def update_trade_table(n):
             return html.Div('Nenhum trade realizado ainda.')
 
         # Exibir apenas colunas relevantes na tabela
-        columns_to_display = ['interval', 'symbol', 'entry_time', 'exit_time', 'entry_price', 'exit_price', 'profit', 'position']
+        columns_to_display = ['interval', 'symbol', 'entry_time', 'exit_time', 'entry_price', 'exit_price', 'profit',
+                              'position']
         return dbc.Table.from_dataframe(trade_results[columns_to_display], striped=True, bordered=True, hover=True)
+
 
 # Callback para gerar gráfico do backtest
 @app.callback(
@@ -918,6 +934,7 @@ def update_backtest_results_graph(n):
         ))
         figure.update_layout(title='Resultados do Backtest', xaxis_title='Data', yaxis_title='Lucro Acumulado')
         return figure
+
 
 # Callback para gerar gráfico do histórico de trades
 @app.callback(
@@ -950,6 +967,7 @@ def update_trades_history(n):
         figure.update_layout(title='Histórico de Trades', xaxis_title='Data', yaxis_title='Preço')
 
         return figure
+
 
 # ---------------------------
 # 12. Função Principal para Executar o Bot

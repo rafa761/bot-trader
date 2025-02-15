@@ -6,13 +6,13 @@ além de registrar callbacks necessários.
 """
 
 import dash
+import dash_bootstrap_components as dbc
+import plotly.graph_objs as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
-import plotly.graph_objs as go
-import dash_bootstrap_components as dbc
 
-from data_handler import DataHandler
 from config import config
+from data_handler import DataHandler
 
 
 def create_dashboard(data_handler: DataHandler) -> dash.Dash:

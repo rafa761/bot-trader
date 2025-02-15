@@ -8,15 +8,14 @@ cálculo de indicadores técnicos.
 
 import asyncio
 import threading
-import pandas as pd
-import numpy as np
-import requests
 
+import pandas as pd
+import requests
 from binance.exceptions import BinanceAPIException
 from ta import trend, momentum, volatility
 
-from logger import logger
 from binance_client import BinanceClient
+from logger import logger
 
 
 class DataHandler:
@@ -57,7 +56,8 @@ class DataHandler:
                     "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
                 ])
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-                df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(float)
+                df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(
+                    float)
                 df.dropna(inplace=True)
                 df.reset_index(drop=True, inplace=True)
                 return df[["timestamp", "open", "high", "low", "close", "volume"]]

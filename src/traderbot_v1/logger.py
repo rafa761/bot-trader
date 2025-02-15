@@ -1,7 +1,6 @@
 # logger.py
 
 import logging.handlers
-import os
 from pathlib import Path
 
 logs_dir = Path("logs")

@@ -1,7 +1,6 @@
 import logging
 import logging.handlers
 import os
-from pathlib import Path
 
 import joblib
 import pandas as pd
@@ -201,7 +200,7 @@ def train_model(X_train, y_train, model_name):
         logging.info(f"Iniciando treinamento do modelo para {model_name}.")
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
-        joblib.dump(model,  f'model_{model_name}.pkl')
+        joblib.dump(model, f'model_{model_name}.pkl')
         logging.info(f"Modelo para {model_name} treinado e salvo como model_{model_name}.pkl.")
         return model
     except Exception as e:
