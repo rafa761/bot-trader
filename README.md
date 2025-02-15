@@ -13,7 +13,6 @@ Projeto de um bot para fazer trade de bitcoin
 pip install -r requirements.txt
 ```
 
-
 # Estrutura do Trading Bot V1
 
 * **config.py** cuida de variáveis de ambiente e configurações.

@@ -26,8 +26,8 @@ class TradingStrategy:
         self.daily_profit: float = 0.0
 
         # Pode usar como default (se não usar a abordagem dinâmica):
-        self.base_risk_per_trade: float = 0.02
-        self.leverage: int = 25
+        self.base_risk_per_trade: float = 0.20
+        self.leverage: int = 5
 
     def reset_position(self) -> None:
         """Reseta todos os parâmetros de posição."""

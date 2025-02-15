@@ -15,3 +15,6 @@ scikit-learn==1.6.1
 xgboost==2.1.4
 schedule==1.2.2
 nltk==3.9.1
+pydantic==2.10.6
+pydantic-settings==2.7.1
+customtkinter==5.2.2
