@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SonarLintProjectSettings">
+    <option name="fileExclusions">
+      <list>
+        <option value="DIRECTORY:src/bot_antigo" />
+        <option value="DIRECTORY:src/bot_r1" />
+        <option value="DIRECTORY:src/traderbot_v1" />
+      </list>
+    </option>
+  </component>
+</project>
