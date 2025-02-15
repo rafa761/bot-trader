@@ -8,8 +8,10 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    BINANCE_API_KEY_TESTNET: str = Field(..., description="Chave de API para conexão com a Binance")
-    BINANCE_API_SECRET_TESTNET: str = Field(..., description="Secret de API para conexão com a Binance")
+    BINANCE_API_KEY: str = Field(..., description="Chave de API para conexão com a Binance Testnet")
+    BINANCE_API_SECRET: str = Field(..., description="Secret de API para conexão com a Binance Testnet")
+    BINANCE_API_KEY_TESTNET: str = Field(..., description="Chave de API para conexão com a Binance Testnet")
+    BINANCE_API_SECRET_TESTNET: str = Field(..., description="Secret de API para conexão com a Binance Testnet")
     NEWS_API_KEY: str = Field(..., description="Chave de API para busca de notícias")
     SENTIMENT_ANALYSIS_ENABLED: bool = Field(False, description="Indica se deve habilitar a análise de sentimento")
     SYMBOL: str = Field("BTCUSDT", description="Par de trading")
