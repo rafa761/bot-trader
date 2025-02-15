@@ -25,10 +25,15 @@ class InMemoryLogger(logging.Handler):
         return self.records
 
 
-def setup_logging():
-    # Define o formato do log
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+# Define o formato do log
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
+# Instancia o handler em memória
+memory_logger = InMemoryLogger(capacity=5000)
+memory_logger.setFormatter(formatter)
+
+
+def setup_logging():
     # Configura o logging basico
     logging.basicConfig(
         level=logging.INFO,
@@ -42,10 +47,6 @@ def setup_logging():
             logging.StreamHandler()
         ]
     )
-
-    # Instancia o handler em memória
-    memory_logger = InMemoryLogger(capacity=5000)
-    memory_logger.setFormatter(formatter)
 
     # Adiciona o handler de memória ao logger root
     logging.getLogger().addHandler(memory_logger)

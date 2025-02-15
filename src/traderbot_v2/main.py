@@ -42,11 +42,14 @@ def main() -> None:
     dash_thread.start()
 
     try:
+        logger.info("Bot iniciado")
+
         # Executa o loop principal do bot
         asyncio.run(bot.run())
     except KeyboardInterrupt:
         logger.info("Bot interrompido manualmente.")
     finally:
+        logger.info("Bot finalizado")
         twm.stop()
 
 

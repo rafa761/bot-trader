@@ -50,6 +50,8 @@ class TradingBot:
         self.training_interval = 50
         self.cycle_count = 0
 
+        self.last_position = None
+
     async def initialize_filters(self) -> None:
         """
         Inicializa os filtros (tickSize e stepSize) e tenta ajustar alavancagem
@@ -78,8 +80,10 @@ class TradingBot:
 
         while True:
             self.cycle_count += 1
+            logger.debug("Iniciando ciclo {self.cycle_count}")
 
             # Passo 1: Obter dados recentes
+            logger.info(f"Coletando dados do intervalo {self.interval}")
             new_data = await self.data_handler.get_latest_data(self.symbol, self.interval, limit=2)
             if not new_data.empty:
                 if self.data_handler.historical_df.empty:
@@ -100,11 +104,13 @@ class TradingBot:
                             "volume": row["volume"]
                         }
                         self.data_handler.update_historical_data(new_row)
+                        logger.debug(f"Atualizado candle: {new_row}")
 
             # Passo 2: Retreinamento periódico (online learning)
             if (self.cycle_count % self.training_interval) == 0:
                 df_train = self.data_handler.historical_df.copy()
                 if len(df_train) >= 300:
+                    logger.info("Treinando modelo")
                     df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
 
                     features = df_train[["sma_short", "sma_long", "rsi", "macd",
@@ -124,6 +130,7 @@ class TradingBot:
                     target_sl = target_sl.iloc[:-1]
 
                     self.model_manager.train_models(features, target_tp, target_sl)
+                    logger.info("Modelo treinado com sucesso")
                 else:
                     logger.info("Ainda não há dados suficientes para treinar.")
 
@@ -131,7 +138,38 @@ class TradingBot:
             open_long = self.binance_client.get_open_position_by_side(self.symbol, "LONG")
             open_short = self.binance_client.get_open_position_by_side(self.symbol, "SHORT")
 
-            if open_long is not None or open_short is not None:
+            # Se não há posição aberta no momento...
+            if open_long is None and open_short is None:
+                # ...mas antes havia, então foi fechada
+                if self.last_position is not None:
+                    # Aqui podemos calcular o PnL (lucro/prejuízo).
+                    # Maneira simples (com a diferença de preço do candle atual):
+                    # - ATENÇÃO: isso não reflete taxas de trading, funding, slippage real etc.
+                    exit_price = self.binance_client.get_futures_last_price(self.symbol)
+                    entry_price = self.last_position["entry_price"]
+                    quantity = self.last_position["quantity"]
+                    side = self.last_position["side"]  # LONG ou SHORT
+
+                    # Calcula lucro/preju baseado na direção
+                    if side == "LONG":
+                        # PnL = (exit_price - entry_price) * quantity
+                        pnl = (exit_price - entry_price) * quantity
+                    else:  # SHORT
+                        pnl = (entry_price - exit_price) * quantity
+
+                    # Loga o fechamento
+                    logger.info(
+                        f"Posição {side} encerrada. Preço de entrada: {entry_price}, "
+                        f"Preço de saída: {exit_price}, Quantidade: {quantity}, "
+                        f"Lucro/Prejuízo = {pnl:.2f} USDT"
+                    )
+
+                    # Zera a referência à posição
+                    self.last_position = None
+
+                logger.info("Nenhuma posição aberta no momento. Aguardando novo sinal.")
+
+            elif open_long is not None or open_short is not None:
                 logger.info("Já existe posição aberta. Aguardando fechamento para abrir novo trade.")
             else:
                 # Passo 4: Caso não haja posição, checar sinal do modelo
@@ -192,7 +230,28 @@ class TradingBot:
                             await asyncio.sleep(5)
                             continue
 
+                            # Salva informação da posição "aberta" em self.last_position
+                            self.last_position = {
+                                "side": position_side,  # LONG ou SHORT
+                                "entry_price": current_price,
+                                "quantity": qty_adj,
+                                "symbol": self.symbol
+                            }
+
+                        logger.info(
+                            f"Sinal gerado: "
+                            f"side={side}, "
+                            f"position_side={position_side}, "
+                            f"predicted_tp={tp_factor}, "
+                            f"predicted_sl={sl_factor}, "
+                            f"tp_price={tp_price}, "
+                            f"sl_price={sl_price}, "
+                            f"current_price={current_price}, "
+                            f"leverage={self.leverage}, "
+                            f"risk_per_trade={self.risk_per_trade}"
+                        )
                         logger.info(f"Abrindo {direction} c/ qty={qty_adj}, lastPrice={current_price:.2f}...")
+
                         order_resp = self.binance_client.place_order_with_retry(
                             symbol=self.symbol,
                             side=side,
