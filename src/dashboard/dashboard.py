@@ -12,9 +12,9 @@ import plotly.graph_objs as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
-from config import config
-from data_handler import DataHandler
-from logger import memory_logger
+from core.config import config
+from core.logger import memory_logger
+from repositories.data_handler import DataHandler
 
 
 def create_dashboard(data_handler: DataHandler) -> dash.Dash:

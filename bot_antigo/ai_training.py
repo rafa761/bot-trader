@@ -95,7 +95,7 @@ def add_technical_indicators(df):
 def create_labels(df, horizon=12):
     """
     Cria labels para TP e SL com base no movimento de preço futuro.
-    
+
     :param df: DataFrame com dados históricos e indicadores técnicos.
     :param horizon: Número de períodos futuros para considerar ao definir TP e SL.
     :return: DataFrame com novas colunas 'TP_pct' e 'SL_pct'.
@@ -126,7 +126,7 @@ def create_labels(df, horizon=12):
 def preprocess_data(df, feature_columns):
     """
     Normaliza as features e as labels.
-    
+
     :param df: DataFrame com dados e labels.
     :param feature_columns: Lista de colunas que serão usadas como features.
     :return: Scalers e dados normalizados.
@@ -164,7 +164,7 @@ def preprocess_data(df, feature_columns):
 def split_data(data_scaled, feature_columns, test_size=0.2):
     """
     Divide os dados em conjuntos de treino e teste.
-    
+
     :param data_scaled: DataFrame com dados normalizados.
     :param feature_columns: Lista de colunas que serão usadas como features.
     :param test_size: Proporção dos dados que será usada para teste.
@@ -190,7 +190,7 @@ def split_data(data_scaled, feature_columns, test_size=0.2):
 def train_model(X_train, y_train, model_name):
     """
     Treina um modelo de regressão e salva o modelo treinado.
-    
+
     :param X_train: Dados de treino.
     :param y_train: Labels de treino.
     :param model_name: Nome para salvar o modelo.
@@ -211,7 +211,7 @@ def train_model(X_train, y_train, model_name):
 def evaluate_model(model, X_test, y_test, model_name):
     """
     Avalia o modelo usando o conjunto de teste.
-    
+
     :param model: Modelo treinado.
     :param X_test: Dados de teste.
     :param y_test: Labels de teste.

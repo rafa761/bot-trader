@@ -4,7 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-logs_dir = Path("logs")
+logs_dir = Path("../logs")
 logs_dir.mkdir(exist_ok=True)
 
 

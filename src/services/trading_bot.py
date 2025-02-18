@@ -11,13 +11,13 @@ import sys
 
 import pandas as pd
 
-from binance_client import BinanceClient
-from config import config
-from constants import FEATURE_COLUMNS
-from data_handler import DataHandler
-from logger import logger
-from model_manager import ModelManager
-from trading_strategy import TradingStrategy
+from core.config import config
+from core.constants import FEATURE_COLUMNS
+from core.logger import logger
+from models.model_manager import ModelManager
+from repositories.data_handler import DataHandler
+from services.binance_client import BinanceClient
+from services.trading_strategy import TradingStrategy
 
 
 class TradingBot:
