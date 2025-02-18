@@ -1,0 +1,40 @@
+# Instala os hooks de pre commit
+# pre-commit install
+# pre-commit install --hook-type prepare-commit-msg
+
+default_language_version:
+  python: python3.12
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [ --maxkb=2048 ]
+      #      - id: debug-statements
+      #        language_version: python3
+      - id: mixed-line-ending
+      - id: no-commit-to-branch
+        args: [ -b develop -b master ]
+      - id: requirements-txt-fixer
+      - id: trailing-whitespace
+        args: [ --markdown-linebreak-ext=md ]
+
+  #  - repo: https://github.com/psf/black
+  #    rev: 21.9b0
+  #    hooks:
+  #      - id: black
+  #        args: # arguments to configure black
+  #          - --line-length=120
+  #          - --include='\.pyi?$'
+
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.19.1
+    hooks:
+      - id: pyupgrade
+        args: [ --py312-plus ]
+
+  - repo: https://github.com/radix-ai/auto-smart-commit
+    rev: v1.0.3
+    hooks:
+      - id: auto-smart-commit

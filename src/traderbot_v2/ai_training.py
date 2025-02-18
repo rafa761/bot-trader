@@ -6,16 +6,17 @@ import pandas as pd
 import ta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from config import config
+from constants import FEATURE_COLUMNS
 from logger import logger
 
-
-# ---------------------------- Classes e Funções Refatoradas ----------------------------
 
 class DataCollector:
     def __init__(self, client: Client):
@@ -26,7 +27,9 @@ class DataCollector:
         """Obtém dados históricos de candles da Binance."""
         try:
             logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
+
             klines = self.client.get_historical_klines(symbol, interval, start_str, end_str)
+
             df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -35,7 +38,9 @@ class DataCollector:
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+
             logger.info(f"Coleta de dados concluída: {len(df)} registros coletados.")
+
             return df
         except BinanceAPIException as e:
             logger.error(f"Erro ao coletar dados históricos: {e}")
@@ -51,13 +56,21 @@ class TechnicalIndicatorAdder:
         """Adiciona indicadores técnicos ao DataFrame."""
         try:
             logger.info("Adicionando indicadores técnicos ao DataFrame.")
+
             df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
             df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
             df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
-            df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'],
-                                                       window=14).average_true_range()
-            df.dropna(inplace=True)
+            df['atr'] = ta.volatility.AverageTrueRange(
+                high=df['high'],
+                low=df['low'], close=df['close'],
+                window=14
+            ).average_true_range()
+            df["macd"] = ta.trend.macd_diff(df["close"])
+            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
+            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
+
             logger.info("Indicadores técnicos adicionados com sucesso.")
+
             return df
         except Exception as e:
             logger.error(f"Erro ao adicionar indicadores técnicos: {e}")
@@ -83,85 +96,119 @@ class LabelCreator:
             return df
 
 
-class DataPreprocessor:
-    @staticmethod
-    def preprocess_data(df: pd.DataFrame, feature_columns: List[str]) -> Tuple[
-        Optional[StandardScaler], Optional[StandardScaler], Optional[StandardScaler], Optional[pd.DataFrame]]:
-        """Normaliza as features e as labels."""
-        try:
-            logger.info("Iniciando pré-processamento dos dados.")
-            X = df[feature_columns]
-            y_tp = df['TP_pct']
-            y_sl = df['SL_pct']
-
-            scaler_X = StandardScaler()
-            scaler_y_tp = StandardScaler()
-            scaler_y_sl = StandardScaler()
-
-            X_scaled = scaler_X.fit_transform(X)
-            y_tp_scaled = scaler_y_tp.fit_transform(y_tp.values.reshape(-1, 1)).flatten()
-            y_sl_scaled = scaler_y_sl.fit_transform(y_sl.values.reshape(-1, 1)).flatten()
-
-            data_scaled = pd.DataFrame(X_scaled, columns=feature_columns, index=df.index)
-            data_scaled['TP_pct'] = y_tp_scaled
-            data_scaled['SL_pct'] = y_sl_scaled
-
-            logger.info("Pré-processamento concluído com sucesso.")
-            return scaler_X, scaler_y_tp, scaler_y_sl, data_scaled
-        except Exception as e:
-            logger.error(f"Erro no pré-processamento dos dados: {e}")
-            return None, None, None, None
-
-
 class DataSplitter:
     @staticmethod
-    def split_data(data_scaled: pd.DataFrame, feature_columns: List[str], test_size: float = 0.2) -> Tuple[
-        Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series], Optional[pd.Series],
-        Optional[pd.Series]]:
-        """Divide os dados em conjuntos de treino e teste."""
+    def split_data(data: pd.DataFrame,
+                   feature_columns: List[str],
+                   test_size: float = 0.2) -> Tuple[
+        pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
+        """
+        Divide os dados em conjuntos de treino e teste (shuffle=False para simular dados temporais).
+        Retorna X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test.
+        """
         try:
             logger.info("Dividindo os dados em conjuntos de treino e teste.")
-            X = data_scaled[feature_columns]
-            y_tp = data_scaled['TP_pct']
-            y_sl = data_scaled['SL_pct']
+
+            X = data[feature_columns]
+            y_tp = data['TP_pct']
+            y_sl = data['SL_pct']
 
             X_train, X_test, y_tp_train, y_tp_test = train_test_split(X, y_tp, test_size=test_size, shuffle=False)
             _, _, y_sl_train, y_sl_test = train_test_split(X, y_sl, test_size=test_size, shuffle=False)
 
             logger.info("Divisão dos dados concluída.")
+
             return X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test
         except Exception as e:
             logger.error(f"Erro ao dividir os dados: {e}")
-            return None, None, None, None, None, None
+            return pd.DataFrame(), pd.DataFrame(), pd.Series(), pd.Series(), pd.Series(), pd.Series()
 
 
 class ModelTrainer:
     def __init__(self, train_data_dir: Path):
         self.train_data_dir = train_data_dir
 
-    def train_model(self, X_train: pd.DataFrame, y_train: pd.Series, model_name: str) -> Optional[
-        RandomForestRegressor]:
-        """Treina um modelo de regressão e salva o modelo treinado."""
+    @staticmethod
+    def _build_pipeline(feature_columns: List[str]) -> Pipeline:
+        """
+        Constrói um pipeline com um ColumnTransformer para escalonar apenas as colunas de interesse,
+        seguido de um RandomForestRegressor.
+        """
+        # Transformador numérico (StandardScaler) aplicado apenas às colunas de features
+        numeric_transformer = Pipeline(
+            steps=[('scaler', StandardScaler())]
+        )
+
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ('num', numeric_transformer, feature_columns)
+            ]
+        )
+
+        # Montamos o pipeline final com o preprocessor + regressão
+        pipeline = Pipeline(
+            steps=[
+                ('preprocessor', preprocessor),
+                ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+            ]
+        )
+        return pipeline
+
+    def train_model(
+            self,
+            X_train: pd.DataFrame,
+            y_train: pd.Series,
+            feature_columns: List[str],
+            model_name: str
+    ) -> Optional[Pipeline]:
+        """Treina um modelo (pipeline) e salva-o em disco."""
         try:
-            logger.info(f"Iniciando treinamento do modelo para {model_name}.")
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-            model.fit(X_train, y_train)
-            joblib.dump(model, self.train_data_dir / f'model_{model_name}.pkl')
-            logger.info(f"Modelo para {model_name} treinado e salvo como model_{model_name}.pkl.")
-            return model
+            logger.info(f"Iniciando treinamento do modelo para {model_name}...")
+
+            # Cria o pipeline
+            model_pipeline = self._build_pipeline(feature_columns)
+
+            # Treina
+            model_pipeline.fit(X_train, y_train)
+
+            # Salva em disco
+            output_path = self.train_data_dir / f'model_{model_name}.pkl'
+            joblib.dump(model_pipeline, output_path)
+            logger.info(f"Modelo '{model_name}' treinado e salvo em {output_path}.")
+
+            return model_pipeline
         except Exception as e:
             logger.error(f"Erro ao treinar o modelo para {model_name}: {e}")
             return None
 
     @staticmethod
-    def evaluate_model(model: RandomForestRegressor, X_test: pd.DataFrame, y_test: pd.Series, model_name: str) -> \
-    Optional[float]:
-        """Avalia o modelo usando o conjunto de teste."""
+    def evaluate_model(model_pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series,
+                       model_name: str) -> float | None:
+        """Avalia o modelo (pipeline) usando o conjunto de teste e exibe logs adicionais no modo debug."""
         try:
-            logger.info(f"Avaliação do modelo para {model_name}.")
-            y_pred = model.predict(X_test)
+            logger.info(f"Avaliação do modelo para {model_name}...")
+            y_pred = model_pipeline.predict(X_test)
             mae = mean_absolute_error(y_test, y_pred)
-            logger.info(f"Mean Absolute Error para {model_name}: {mae:.2f}%")
+            logger.info(f"Mean Absolute Error para {model_name}: {mae:.4f}")
+
+            # Mostra algumas previsões vs. valores reais no logger.debug
+            # (ajusta 'range(5)' para ver mais ou menos exemplos)
+            logger.info(f"[{model_name}] Primeiras previsões vs. valores reais:")
+            for idx in range(min(5, len(y_test))):
+                real = y_test.iloc[idx]
+                pred = y_pred[idx]
+                logger.info(f"Idx={y_test.index[idx]} | Prev={pred:.4f}, Real={real:.4f}")
+
+            # Exemplo de cálculo de "assertividade de direção"
+            total_count = len(y_test)
+            correct_direction_count = 0
+            for real, pred in zip(y_test, y_pred):
+                if (real >= 0 and pred >= 0) or (real < 0 and pred < 0):
+                    correct_direction_count += 1
+            accuracy_direction = correct_direction_count / total_count if total_count else 0
+
+            logger.info(f"[{model_name}] Assertividade de direção: {accuracy_direction:.2%}")
+
             return mae
         except Exception as e:
             logger.error(f"Erro ao avaliar o modelo para {model_name}: {e}")
@@ -169,69 +216,48 @@ class ModelTrainer:
 
 
 # ---------------------------- Fluxo Principal ----------------------------
-
 def main():
-    # Configurações
-    symbol = config.SYMBOL
-    interval = config.INTERVAL
-    start_date = '1 Jan, 2020'
-    horizon = 12
-    feature_columns = ['sma_short', 'sma_long', 'rsi', 'atr', 'volume']
     train_data_dir = Path('train_data')
     train_data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Inicializa o cliente da Binance
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})
 
-    # Coleta de dados
+    # 1) Coleta de dados
     data_collector = DataCollector(client)
-    df = data_collector.get_historical_klines(symbol, interval, start_date)
+    df = data_collector.get_historical_klines(config.SYMBOL, config.INTERVAL, config.MODEL_DATA_TRAINING_START_DATE)
     if df.empty:
         logger.error("Não foi possível coletar dados históricos. Encerrando o script.")
         return
 
-    # Adiciona indicadores técnicos
+    # 2) Adiciona indicadores técnicos
     df = TechnicalIndicatorAdder.add_technical_indicators(df)
 
-    # Cria labels
-    df = LabelCreator.create_labels(df, horizon)
-
-    # Pré-processamento
-    scaler_X, scaler_y_tp, scaler_y_sl, data_scaled = DataPreprocessor.preprocess_data(df, feature_columns)
-    if data_scaled is None:
-        logger.error("Pré-processamento falhou. Encerrando o script.")
+    # 3) Cria labels
+    df = LabelCreator.create_labels(df, config.MODEL_DATA_PREDICTION_HORIZON)
+    if df.empty:
+        logger.error("Não foi possível criar labels. Encerrando o script.")
         return
 
-    # Divisão dos dados
-    X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test = DataSplitter.split_data(data_scaled,
-                                                                                            feature_columns)
-    if X_train is None:
+    # 4) Divide dados em treino e teste (sem escalonamento manual)
+    X_train, X_test, y_tp_train, y_tp_test, y_sl_train, y_sl_test = DataSplitter.split_data(df, FEATURE_COLUMNS)
+    if X_train.empty:
         logger.error("Divisão dos dados falhou. Encerrando o script.")
         return
 
-    # Treinamento dos modelos
+    # 5) Treinamento dos modelos usando Pipeline + ColumnTransformer
     model_trainer = ModelTrainer(train_data_dir)
-    model_tp = model_trainer.train_model(X_train, y_tp_train, 'tp')
-    model_sl = model_trainer.train_model(X_train, y_sl_train, 'sl')
 
-    if model_tp is None or model_sl is None:
-        logger.error("Treinamento dos modelos falhou. Encerrando o script.")
-        return
+    # Treinamos dois modelos: um para TP e outro para SL
+    model_tp = model_trainer.train_model(X_train, y_tp_train, FEATURE_COLUMNS, 'tp')
+    model_sl = model_trainer.train_model(X_train, y_sl_train, FEATURE_COLUMNS, 'sl')
 
-    # Avaliação dos modelos
-    mae_tp = model_trainer.evaluate_model(model_tp, X_test, y_tp_test, 'tp')
-    mae_sl = model_trainer.evaluate_model(model_sl, X_test, y_sl_test, 'sl')
+    # 6) Avaliação
+    if model_tp:
+        model_trainer.evaluate_model(model_tp, X_test, y_tp_test, 'tp')
+    if model_sl:
+        model_trainer.evaluate_model(model_sl, X_test, y_sl_test, 'sl')
 
-    # Salva os scalers
-    try:
-        joblib.dump(scaler_X, train_data_dir / 'scaler_X.pkl')
-        joblib.dump(scaler_y_tp, train_data_dir / 'scaler_y_tp.pkl')
-        joblib.dump(scaler_y_sl, train_data_dir / 'scaler_y_sl.pkl')
-        logger.info("Scalers salvos como scaler_X.pkl, scaler_y_tp.pkl e scaler_y_sl.pkl.")
-    except Exception as e:
-        logger.error(f"Erro ao salvar scalers: {e}")
-
-    logger.info("Processo de treinamento concluído com sucesso.")
+    logger.info("Processo de treinamento concluído.")
 
 
 if __name__ == "__main__":

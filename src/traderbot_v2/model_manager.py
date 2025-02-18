@@ -12,6 +12,7 @@ import joblib
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
+from constants import FEATURE_COLUMNS
 from logger import logger
 
 models_dir = Path("train_data")
@@ -78,6 +79,19 @@ class ModelManager:
         :param df_eval: DataFrame com colunas [sma_short, sma_long, rsi, macd, boll_hband, boll_lband, atr]
         :return: (predicted_tp_pct, predicted_sl_pct)
         """
+        # Obter as features que o modelo espera
+        if self.pipeline_tp is not None:
+            transformer = self.pipeline_tp.named_steps['preprocessor']
+            expected_features = transformer.get_feature_names_out()
+            logger.info(f"Features esperadas pelo modelo: {expected_features}")
+
+        # Verificar se todas as features do FEATURE_COLUMNS estão presentes
+        required_features = FEATURE_COLUMNS
+        missing = set(required_features) - set(df_eval.columns)
+        if missing:
+            logger.error(f"Features faltando: {missing}")
+            return 0.0, 0.0
+
         if self.pipeline_tp is not None and self.pipeline_sl is not None:
             try:
                 predicted_tp_pct = self.pipeline_tp.predict(df_eval)[0]
@@ -86,5 +100,7 @@ class ModelManager:
             except Exception as e:
                 logger.error(f"Erro ao executar predição TP/SL: {e}", exc_info=True)
                 return 0.0, 0.0
+
         logger.warning("Pipelines não disponíveis para predição.")
+
         return 0.0, 0.0

@@ -13,6 +13,7 @@ import pandas as pd
 
 from binance_client import BinanceClient
 from config import config
+from constants import FEATURE_COLUMNS
 from data_handler import DataHandler
 from logger import logger
 from model_manager import ModelManager
@@ -50,8 +51,6 @@ class TradingBot:
         self.training_interval = 50
         self.cycle_count = 0
 
-        self.last_position = None
-
         logger.info("classe TradingBot inicializada com sucesso.")
 
     async def initialize_filters(self) -> None:
@@ -82,7 +81,7 @@ class TradingBot:
 
         while True:
             self.cycle_count += 1
-            logger.debug("Iniciando ciclo {self.cycle_count}")
+            logger.debug(f"Iniciando ciclo {self.cycle_count}")
 
             # Passo 1: Obter dados recentes
             logger.info(f"Coletando dados do intervalo {self.interval}")
@@ -115,8 +114,7 @@ class TradingBot:
                     logger.info("Treinando modelo")
                     df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
 
-                    features = df_train[["sma_short", "sma_long", "rsi", "macd",
-                                         "boll_hband", "boll_lband", "atr"]].copy()
+                    features = df_train[FEATURE_COLUMNS].copy()
                     features.dropna(inplace=True)
                     target_tp = df_train["pct_change_next"].copy()
                     target_sl = df_train["pct_change_next"].copy()
@@ -140,38 +138,7 @@ class TradingBot:
             open_long = self.binance_client.get_open_position_by_side(self.symbol, "LONG")
             open_short = self.binance_client.get_open_position_by_side(self.symbol, "SHORT")
 
-            # Se não há posição aberta no momento...
-            if open_long is None and open_short is None:
-                # ...mas antes havia, então foi fechada
-                if self.last_position is not None:
-                    # Aqui podemos calcular o PnL (lucro/prejuízo).
-                    # Maneira simples (com a diferença de preço do candle atual):
-                    # - ATENÇÃO: isso não reflete taxas de trading, funding, slippage real etc.
-                    exit_price = self.binance_client.get_futures_last_price(self.symbol)
-                    entry_price = self.last_position["entry_price"]
-                    quantity = self.last_position["quantity"]
-                    side = self.last_position["side"]  # LONG ou SHORT
-
-                    # Calcula lucro/preju baseado na direção
-                    if side == "LONG":
-                        # PnL = (exit_price - entry_price) * quantity
-                        pnl = (exit_price - entry_price) * quantity
-                    else:  # SHORT
-                        pnl = (entry_price - exit_price) * quantity
-
-                    # Loga o fechamento
-                    logger.info(
-                        f"Posição {side} encerrada. Preço de entrada: {entry_price}, "
-                        f"Preço de saída: {exit_price}, Quantidade: {quantity}, "
-                        f"Lucro/Prejuízo = {pnl:.2f} USDT"
-                    )
-
-                    # Zera a referência à posição
-                    self.last_position = None
-
-                logger.info("Nenhuma posição aberta no momento. Aguardando novo sinal.")
-
-            elif open_long is not None or open_short is not None:
+            if open_long is not None or open_short is not None:
                 logger.info("Já existe posição aberta. Aguardando fechamento para abrir novo trade.")
             else:
                 # Passo 4: Caso não haja posição, checar sinal do modelo
@@ -184,16 +151,19 @@ class TradingBot:
 
                     df_eval = self.data_handler.historical_df.copy()
                     last_row = df_eval.iloc[-1]
-                    X_eval = pd.DataFrame([[
-                        last_row["sma_short"],
-                        last_row["sma_long"],
-                        last_row["rsi"],
-                        last_row["macd"],
-                        last_row["boll_hband"],
-                        last_row["boll_lband"],
-                        last_row["atr"]
-                    ]],
-                        columns=["sma_short", "sma_long", "rsi", "macd", "boll_hband", "boll_lband", "atr"])
+                    X_eval = pd.DataFrame(
+                        [[
+                            last_row["sma_short"],
+                            last_row["sma_long"],
+                            last_row["rsi"],
+                            last_row["atr"],
+                            last_row["volume"],
+                            last_row["macd"],
+                            last_row["boll_hband"],
+                            last_row["boll_lband"]
+                        ]],
+                        columns=FEATURE_COLUMNS,
+                    )
 
                     predicted_tp_pct, predicted_sl_pct = self.model_manager.predict_tp_sl(X_eval)
                     logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
@@ -231,14 +201,6 @@ class TradingBot:
                             logger.warning("Qty ajustada <= 0. Trade abortado.")
                             await asyncio.sleep(5)
                             continue
-
-                            # Salva informação da posição "aberta" em self.last_position
-                            self.last_position = {
-                                "side": position_side,  # LONG ou SHORT
-                                "entry_price": current_price,
-                                "quantity": qty_adj,
-                                "symbol": self.symbol
-                            }
 
                         logger.info(
                             f"Sinal gerado: "
@@ -288,16 +250,12 @@ class TradingBot:
         position_side = direction
         if direction == "LONG":
             # Ajuste de TP
-            if tp_price <= current_price:
-                tp_price = current_price + (self.tick_size * 10)
             tp_price_adj = self.strategy.adjust_price_to_tick_size(tp_price, self.tick_size)
             if tp_price_adj <= current_price:
                 tp_price_adj = current_price + (self.tick_size * 10)
             tp_str = self.strategy.format_price_for_tick_size(tp_price_adj, self.tick_size)
 
             # Ajuste de SL
-            if sl_price >= current_price:
-                sl_price = current_price - (self.tick_size * 10)
             sl_price_adj = self.strategy.adjust_price_to_tick_size(sl_price, self.tick_size)
             if sl_price_adj >= current_price:
                 sl_price_adj = current_price - (self.tick_size * 10)
@@ -307,16 +265,12 @@ class TradingBot:
         else:  # SHORT
             position_side = "SHORT"
             # Ajuste de TP
-            if tp_price >= current_price:
-                tp_price = current_price - (self.tick_size * 10)
             tp_price_adj = self.strategy.adjust_price_to_tick_size(tp_price, self.tick_size)
             if tp_price_adj >= current_price:
                 tp_price_adj = current_price - (self.tick_size * 10)
             tp_str = self.strategy.format_price_for_tick_size(tp_price_adj, self.tick_size)
 
             # Ajuste de SL
-            if sl_price <= current_price:
-                sl_price = current_price + (self.tick_size * 10)
             sl_price_adj = self.strategy.adjust_price_to_tick_size(sl_price, self.tick_size)
             if sl_price_adj <= current_price:
                 sl_price_adj = current_price + (self.tick_size * 10)

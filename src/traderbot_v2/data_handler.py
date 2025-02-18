@@ -105,10 +105,6 @@ class DataHandler:
             df["sma_short"] = trend.sma_indicator(df["close"], window=5)
             df["sma_long"] = trend.sma_indicator(df["close"], window=10)
             df["rsi"] = momentum.rsi(df["close"], window=14)
-            df["macd"] = trend.macd_diff(df["close"])
-            df["boll_hband"] = volatility.bollinger_hband(df["close"], window=20)
-            df["boll_lband"] = volatility.bollinger_lband(df["close"], window=20)
-
             if len(df) >= 14:
                 df["atr"] = volatility.AverageTrueRange(
                     high=df["high"],
@@ -116,6 +112,9 @@ class DataHandler:
                     close=df["close"],
                     window=14
                 ).average_true_range()
+            df["macd"] = trend.macd_diff(df["close"])
+            df["boll_hband"] = volatility.bollinger_hband(df["close"], window=20)
+            df["boll_lband"] = volatility.bollinger_lband(df["close"], window=20)
 
             df.dropna(inplace=True)
             return df
