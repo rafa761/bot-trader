@@ -79,6 +79,13 @@ class ModelManager:
         :param df_eval: DataFrame com colunas [sma_short, sma_long, rsi, macd, boll_hband, boll_lband, atr]
         :return: (predicted_tp_pct, predicted_sl_pct)
         """
+        # Obter as features que o modelo espera
+        if self.pipeline_tp is not None:
+            transformer = self.pipeline_tp.named_steps['preprocessor']
+            expected_features = transformer.get_feature_names_out()
+            logger.info(f"Features esperadas pelo modelo: {expected_features}")
+
+        # Verificar se todas as features do FEATURE_COLUMNS estão presentes
         required_features = FEATURE_COLUMNS
         missing = set(required_features) - set(df_eval.columns)
         if missing:

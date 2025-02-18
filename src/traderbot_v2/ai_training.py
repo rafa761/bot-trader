@@ -27,7 +27,9 @@ class DataCollector:
         """Obtém dados históricos de candles da Binance."""
         try:
             logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
+
             klines = self.client.get_historical_klines(symbol, interval, start_str, end_str)
+
             df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -36,7 +38,9 @@ class DataCollector:
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+
             logger.info(f"Coleta de dados concluída: {len(df)} registros coletados.")
+
             return df
         except BinanceAPIException as e:
             logger.error(f"Erro ao coletar dados históricos: {e}")
@@ -56,21 +60,14 @@ class TechnicalIndicatorAdder:
             df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
             df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
             df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
-            df['atr'] = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'],
-                                                       window=14).average_true_range()
+            df['atr'] = ta.volatility.AverageTrueRange(
+                high=df['high'],
+                low=df['low'], close=df['close'],
+                window=14
+            ).average_true_range()
             df["macd"] = ta.trend.macd_diff(df["close"])
             df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
             df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
-
-            if len(df) >= 14:
-                df["atr"] = ta.volatility.AverageTrueRange(
-                    high=df["high"],
-                    low=df["low"],
-                    close=df["close"],
-                    window=14
-                ).average_true_range()
-
-            df.dropna(inplace=True)
 
             logger.info("Indicadores técnicos adicionados com sucesso.")
 

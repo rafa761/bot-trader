@@ -151,17 +151,19 @@ class TradingBot:
 
                     df_eval = self.data_handler.historical_df.copy()
                     last_row = df_eval.iloc[-1]
-                    X_eval = pd.DataFrame([[
-                        last_row["sma_short"],
-                        last_row["sma_long"],
-                        last_row["rsi"],
-                        last_row["atr"],
-                        last_row["volume"],
-                        last_row["macd"],
-                        last_row["boll_hband"],
-                        last_row["boll_lband"]
-                    ]],
-                        columns=["sma_short", "sma_long", "rsi", "macd", "boll_hband", "boll_lband", "atr"])
+                    X_eval = pd.DataFrame(
+                        [[
+                            last_row["sma_short"],
+                            last_row["sma_long"],
+                            last_row["rsi"],
+                            last_row["atr"],
+                            last_row["volume"],
+                            last_row["macd"],
+                            last_row["boll_hband"],
+                            last_row["boll_lband"]
+                        ]],
+                        columns=FEATURE_COLUMNS,
+                    )
 
                     predicted_tp_pct, predicted_sl_pct = self.model_manager.predict_tp_sl(X_eval)
                     logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
