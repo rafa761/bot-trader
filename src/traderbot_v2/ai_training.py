@@ -131,7 +131,8 @@ class ModelTrainer:
     def __init__(self, train_data_dir: Path):
         self.train_data_dir = train_data_dir
 
-    def _build_pipeline(self, feature_columns: List[str]) -> Pipeline:
+    @staticmethod
+    def _build_pipeline(feature_columns: List[str]) -> Pipeline:
         """
         Constrói um pipeline com um ColumnTransformer para escalonar apenas as colunas de interesse,
         seguido de um RandomForestRegressor.
@@ -184,14 +185,32 @@ class ModelTrainer:
             return None
 
     @staticmethod
-    def evaluate_model(model_pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series, model_name: str) -> Optional[
-        float]:
-        """Avalia o modelo (pipeline) usando o conjunto de teste."""
+    def evaluate_model(model_pipeline: Pipeline, X_test: pd.DataFrame, y_test: pd.Series,
+                       model_name: str) -> float | None:
+        """Avalia o modelo (pipeline) usando o conjunto de teste e exibe logs adicionais no modo debug."""
         try:
             logger.info(f"Avaliação do modelo para {model_name}...")
             y_pred = model_pipeline.predict(X_test)
             mae = mean_absolute_error(y_test, y_pred)
             logger.info(f"Mean Absolute Error para {model_name}: {mae:.4f}")
+
+            # Mostra algumas previsões vs. valores reais no logger.debug
+            # (ajusta 'range(5)' para ver mais ou menos exemplos)
+            logger.info(f"[{model_name}] Primeiras previsões vs. valores reais:")
+            for idx in range(min(5, len(y_test))):
+                real = y_test.iloc[idx]
+                pred = y_pred[idx]
+                logger.info(f"Idx={y_test.index[idx]} | Prev={pred:.4f}, Real={real:.4f}")
+
+            # Exemplo de cálculo de "assertividade de direção"
+            total_count = len(y_test)
+            correct_direction_count = 0
+            for real, pred in zip(y_test, y_pred):
+                if (real >= 0 and pred >= 0) or (real < 0 and pred < 0):
+                    correct_direction_count += 1
+            accuracy_direction = correct_direction_count / total_count if total_count else 0
+
+            logger.info(f"[{model_name}] Assertividade de direção: {accuracy_direction:.2%}")
 
             return mae
         except Exception as e:
