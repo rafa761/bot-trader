@@ -27,8 +27,8 @@ from dotenv import load_dotenv
 # -----------------------------------------------------------
 load_dotenv()
 
-API_KEY = 'b5361ba39e9ba47bcdc7976ca427714d2dd32544755b9bbffd0e50313cb905ef'
-API_SECRET = '80837417a3f7ec3a27be068c62496bee78a11bc9c2c023a848d657a579a67094'
+API_KEY = os.getenv("BINANCE_API_KEY_TESTNET")
+API_SECRET = os.getenv("BINANCE_API_SECRET_TESTNET")
 
 if not API_KEY or not API_SECRET:
     print("Chaves de API não encontradas. Verifique seu .env ou variáveis de ambiente.")

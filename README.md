@@ -1,6 +1,11 @@
 # Trading Bot Bitcoin
 Projeto de um bot para fazer trade de bitcoin
 
+# Configuração da conta Binance Testnet
+
+1 - Criar conta na [Binance Testnet](https://testnet.binancefuture.com/en/futures/BTCUSDT)
+2 - habilitar o Hedge Mode em "Settings > Position Mode"
+
 # Setup do Projeto
 
 1 - Instalar Python versao 3.12+
