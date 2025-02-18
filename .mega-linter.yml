@@ -9,7 +9,6 @@ DISABLE:
 ENABLE_LINTERS:
   - PYTHON_BLACK
   - PYTHON_ISORT
-  - ACTION_ACTIONLINT
 SHOW_ELAPSED_TIME: false
 FILEIO_REPORTER: true
 # DISABLE_ERRORS: true # Uncomment if you want MegaLinter to detect errors but not block CI to pass
