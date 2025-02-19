@@ -6,16 +6,15 @@ modelos de Take-Profit (TP) e Stop-Loss (SL).
 """
 
 import sys
-from pathlib import Path
 
 import joblib
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 
-models_dir = Path(__file__).parent.parent / "train_data"
+models_dir = TRAINED_MODELS_DIR
 
 
 class ModelManager:
@@ -24,8 +23,10 @@ class ModelManager:
     previsões de TP e SL.
     """
 
-    def __init__(self, model_tp_path: str = models_dir / "model_tp.pkl",
-                 model_sl_path: str = models_dir / "model_sl.pkl"):
+    def __init__(self,
+                 model_tp_path: str = models_dir / "model_tp.pkl",
+                 model_sl_path: str = models_dir / "model_sl.pkl"
+                 ):
         """
         Construtor que tenta carregar os modelos TP e SL de arquivos .pkl.
         Caso não existam, o programa é encerrado.

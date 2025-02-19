@@ -10,7 +10,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 
 from core.config import config
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 
 
@@ -26,7 +26,9 @@ class DataCollector:
         """Obtém dados históricos de candles da Binance."""
         try:
             logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
+
             klines = self.client.get_historical_klines(symbol, interval, start_str, end_str)
+
             df = pd.DataFrame(klines, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -35,7 +37,9 @@ class DataCollector:
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+
             logger.info(f"Coleta de dados concluída: {len(df)} registros coletados.")
+
             return df
         except BinanceAPIException as e:
             logger.error(f"Erro ao coletar dados históricos: {e}")
@@ -56,7 +60,9 @@ class TechnicalIndicatorAdder:
             df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
             df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
             df['atr'] = ta.volatility.AverageTrueRange(
-                high=df['high'], low=df['low'], close=df['close'], window=14
+                high=df['high'],
+                low=df['low'], close=df['close'],
+                window=14
             ).average_true_range()
             df["macd"] = ta.trend.macd_diff(df["close"])
             df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
@@ -66,6 +72,7 @@ class TechnicalIndicatorAdder:
             df.dropna(inplace=True)
 
             logger.info("Indicadores técnicos adicionados com sucesso.")
+
             return df
         except Exception as e:
             logger.error(f"Erro ao adicionar indicadores técnicos: {e}")
@@ -78,6 +85,7 @@ class LabelCreator:
         """Cria labels para TP e SL com base no movimento de preço futuro."""
         try:
             logger.info(f"Criando labels para TP e SL com horizon={horizon} períodos.")
+
             df['future_high'] = df['high'].rolling(window=horizon).max().shift(-horizon)
             df['future_low'] = df['low'].rolling(window=horizon).min().shift(-horizon)
 
@@ -85,9 +93,11 @@ class LabelCreator:
             df['SL_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
 
             df.drop(['future_high', 'future_low'], axis=1, inplace=True)
+
             df.dropna(inplace=True)
 
             logger.info("Labels para TP e SL criados com sucesso.")
+
             return df
         except Exception as e:
             logger.error(f"Erro ao criar labels: {e}")
@@ -248,9 +258,6 @@ class ModelTrainerLSTM:
 # 4) Fluxo Principal
 # ------------------------------------------
 def main():
-    train_data_dir = Path('../train_data')
-    train_data_dir.mkdir(parents=True, exist_ok=True)
-
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})
 
     # 1) Coleta de dados
@@ -271,7 +278,7 @@ def main():
 
     # 4) Cria janelas de sequência para LSTM
     window_size = 30  # Exemplo: usar 30 candles para "olhar para trás"
-    horizon = config.MODEL_DATA_PREDICTION_HORIZON  # 12, conforme config
+    horizon = config.MODEL_DATA_PREDICTION_HORIZON
     X, y_tp, y_sl = DataSplitterLSTM.create_sliding_windows(df, FEATURE_COLUMNS, window_size, horizon)
     if len(X) == 0:
         logger.error("Nenhuma amostra foi gerada após criação das janelas. Encerrando o script.")
@@ -286,7 +293,7 @@ def main():
         return
 
     # 6) Treinamento dos modelos LSTM
-    model_trainer = ModelTrainerLSTM(train_data_dir)
+    model_trainer = ModelTrainerLSTM(TRAINED_MODELS_DIR)
 
     # Treinamos dois modelos: um para TP e outro para SL
     model_tp = model_trainer.train_lstm_model(

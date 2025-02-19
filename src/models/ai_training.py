@@ -13,7 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from core.config import config
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 
 
@@ -216,9 +216,6 @@ class ModelTrainer:
 
 # ---------------------------- Fluxo Principal ----------------------------
 def main():
-    train_data_dir = Path(__file__).parent.parent / "train_data"
-    train_data_dir.mkdir(parents=True, exist_ok=True)
-
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})
 
     # 1) Coleta de dados
@@ -244,7 +241,7 @@ def main():
         return
 
     # 5) Treinamento dos modelos usando Pipeline + ColumnTransformer
-    model_trainer = ModelTrainer(train_data_dir)
+    model_trainer = ModelTrainer(TRAINED_MODELS_DIR)
 
     # Treinamos dois modelos: um para TP e outro para SL
     model_tp = model_trainer.train_model(X_train, y_tp_train, FEATURE_COLUMNS, 'tp')
