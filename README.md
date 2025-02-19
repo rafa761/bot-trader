@@ -15,7 +15,7 @@ Projeto de um bot para fazer trade de bitcoin
 3 - Rodar o seguinte comando instalar as dependencias
 
 ```shell
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 ## Pre commit hooks
