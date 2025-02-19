@@ -12,10 +12,10 @@ import joblib
 import pandas as pd
 from sklearn.pipeline import Pipeline
 
-from constants import FEATURE_COLUMNS
-from logger import logger
+from core.constants import FEATURE_COLUMNS
+from core.logger import logger
 
-models_dir = Path("train_data")
+models_dir = Path(__file__).parent.parent / "train_data"
 
 
 class ModelManager:

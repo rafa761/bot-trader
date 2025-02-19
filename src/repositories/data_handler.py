@@ -14,8 +14,8 @@ import requests
 from binance.exceptions import BinanceAPIException
 from ta import trend, momentum, volatility
 
-from binance_client import BinanceClient
-from logger import logger
+from core.logger import logger
+from services.binance_client import BinanceClient
 
 
 class DataHandler:

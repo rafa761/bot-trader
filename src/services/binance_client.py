@@ -10,8 +10,8 @@ import time
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from config import config
-from logger import logger
+from core.config import config
+from core.logger import logger
 
 
 class BinanceClient:

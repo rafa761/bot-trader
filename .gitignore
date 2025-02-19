@@ -396,8 +396,6 @@ dist
 /src/**/None.*
 /src/**/app/dask-worker-space/
 
-# Base de Dev
-/src/postgresql/dev-dump.zip
 
 # Relatorios do Mega Linter
 /report/
@@ -406,8 +404,9 @@ dist
 megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
-/src/**/train_data/
+/src/train_data/
 /src/**/perf_metric_data/
 
 # Arquivos de treinamento Machine learning
 *.pkl
+*.h5

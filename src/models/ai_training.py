@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 import joblib
 import pandas as pd
@@ -13,9 +12,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from config import config
-from constants import FEATURE_COLUMNS
-from logger import logger
+from core.config import config
+from core.constants import FEATURE_COLUMNS
+from core.logger import logger
 
 
 class DataCollector:
@@ -23,7 +22,7 @@ class DataCollector:
         self.client = client
 
     def get_historical_klines(self, symbol: str, interval: str, start_str: str,
-                              end_str: Optional[str] = None) -> pd.DataFrame:
+                              end_str: str | None = None) -> pd.DataFrame:
         """Obtém dados históricos de candles da Binance."""
         try:
             logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
@@ -99,8 +98,8 @@ class LabelCreator:
 class DataSplitter:
     @staticmethod
     def split_data(data: pd.DataFrame,
-                   feature_columns: List[str],
-                   test_size: float = 0.2) -> Tuple[
+                   feature_columns: list[str],
+                   test_size: float = 0.2) -> tuple[
         pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
         """
         Divide os dados em conjuntos de treino e teste (shuffle=False para simular dados temporais).
@@ -129,7 +128,7 @@ class ModelTrainer:
         self.train_data_dir = train_data_dir
 
     @staticmethod
-    def _build_pipeline(feature_columns: List[str]) -> Pipeline:
+    def _build_pipeline(feature_columns: list[str]) -> Pipeline:
         """
         Constrói um pipeline com um ColumnTransformer para escalonar apenas as colunas de interesse,
         seguido de um RandomForestRegressor.
@@ -158,9 +157,9 @@ class ModelTrainer:
             self,
             X_train: pd.DataFrame,
             y_train: pd.Series,
-            feature_columns: List[str],
+            feature_columns: list[str],
             model_name: str
-    ) -> Optional[Pipeline]:
+    ) -> Pipeline | None:
         """Treina um modelo (pipeline) e salva-o em disco."""
         try:
             logger.info(f"Iniciando treinamento do modelo para {model_name}...")
@@ -217,7 +216,7 @@ class ModelTrainer:
 
 # ---------------------------- Fluxo Principal ----------------------------
 def main():
-    train_data_dir = Path('train_data')
+    train_data_dir = Path(__file__).parent.parent / "train_data"
     train_data_dir.mkdir(parents=True, exist_ok=True)
 
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})

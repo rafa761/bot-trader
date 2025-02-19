@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,9 +9,9 @@ from sklearn.metrics import mean_absolute_error
 from tensorflow import keras
 from tensorflow.keras import layers
 
-from config import config
-from constants import FEATURE_COLUMNS
-from logger import logger
+from core.config import config
+from core.constants import FEATURE_COLUMNS
+from core.logger import logger
 
 
 # ------------------------------------------
@@ -23,7 +22,7 @@ class DataCollector:
         self.client = client
 
     def get_historical_klines(self, symbol: str, interval: str, start_str: str,
-                              end_str: Optional[str] = None) -> pd.DataFrame:
+                              end_str: str | None = None) -> pd.DataFrame:
         """Obtém dados históricos de candles da Binance."""
         try:
             logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
@@ -101,9 +100,9 @@ class LabelCreator:
 class DataSplitterLSTM:
     @staticmethod
     def create_sliding_windows(df: pd.DataFrame,
-                               feature_columns: List[str],
+                               feature_columns: list[str],
                                window_size: int,
-                               horizon: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                               horizon: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Cria janelas de tamanho 'window_size' a partir do DataFrame (para dados temporais),
         de modo que cada X[i] seja uma matriz (window_size x n_features),
@@ -178,7 +177,7 @@ class ModelTrainerLSTM:
                          n_features: int,
                          model_name: str,
                          epochs: int = 50,
-                         batch_size: int = 32) -> Optional[keras.Model]:
+                         batch_size: int = 32) -> keras.Model | None:
         """
         Treina o modelo LSTM e salva em disco.
         """
@@ -249,7 +248,7 @@ class ModelTrainerLSTM:
 # 4) Fluxo Principal
 # ------------------------------------------
 def main():
-    train_data_dir = Path('train_data')
+    train_data_dir = Path('../train_data')
     train_data_dir.mkdir(parents=True, exist_ok=True)
 
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})
