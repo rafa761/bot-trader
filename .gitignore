@@ -405,7 +405,8 @@ megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
 /src/train_data/
-/src/**/perf_metric_data/
+/src/trained_models/
+/src/perf_metric_data/
 
 # Arquivos de treinamento Machine learning
 *.pkl

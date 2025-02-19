@@ -2,9 +2,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-import ta
 from binance.client import Client
-from binance.exceptions import BinanceAPIException
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
@@ -13,86 +11,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from core.config import config
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
-
-
-class DataCollector:
-    def __init__(self, client: Client):
-        self.client = client
-
-    def get_historical_klines(self, symbol: str, interval: str, start_str: str,
-                              end_str: str | None = None) -> pd.DataFrame:
-        """Obtém dados históricos de candles da Binance."""
-        try:
-            logger.info(f"Coletando dados históricos para {symbol} com intervalo {interval} desde {start_str}")
-
-            klines = self.client.get_historical_klines(symbol, interval, start_str, end_str)
-
-            df = pd.DataFrame(klines, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_asset_volume', 'number_of_trades',
-                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-            ])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-
-            logger.info(f"Coleta de dados concluída: {len(df)} registros coletados.")
-
-            return df
-        except BinanceAPIException as e:
-            logger.error(f"Erro ao coletar dados históricos: {e}")
-            return pd.DataFrame()
-        except Exception as e:
-            logger.error(f"Erro inesperado ao coletar dados históricos: {e}")
-            return pd.DataFrame()
-
-
-class TechnicalIndicatorAdder:
-    @staticmethod
-    def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-        """Adiciona indicadores técnicos ao DataFrame."""
-        try:
-            logger.info("Adicionando indicadores técnicos ao DataFrame.")
-
-            df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
-            df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
-            df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
-            df['atr'] = ta.volatility.AverageTrueRange(
-                high=df['high'],
-                low=df['low'], close=df['close'],
-                window=14
-            ).average_true_range()
-            df["macd"] = ta.trend.macd_diff(df["close"])
-            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
-            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
-
-            logger.info("Indicadores técnicos adicionados com sucesso.")
-
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao adicionar indicadores técnicos: {e}")
-            return df
-
-
-class LabelCreator:
-    @staticmethod
-    def create_labels(df: pd.DataFrame, horizon: int = 12) -> pd.DataFrame:
-        """Cria labels para TP e SL com base no movimento de preço futuro."""
-        try:
-            logger.info(f"Criando labels para TP e SL com horizon={horizon} períodos.")
-            df['future_high'] = df['high'].rolling(window=horizon).max().shift(-horizon)
-            df['future_low'] = df['low'].rolling(window=horizon).min().shift(-horizon)
-            df['TP_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
-            df['SL_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
-            df.drop(['future_high', 'future_low'], axis=1, inplace=True)
-            df.dropna(inplace=True)
-            logger.info("Labels para TP e SL criados com sucesso.")
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao criar labels: {e}")
-            return df
+from models.base import DataCollector, LabelCreator
 
 
 class DataSplitter:
@@ -216,9 +137,6 @@ class ModelTrainer:
 
 # ---------------------------- Fluxo Principal ----------------------------
 def main():
-    train_data_dir = Path(__file__).parent.parent / "train_data"
-    train_data_dir.mkdir(parents=True, exist_ok=True)
-
     client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 20})
 
     # 1) Coleta de dados
@@ -227,9 +145,6 @@ def main():
     if df.empty:
         logger.error("Não foi possível coletar dados históricos. Encerrando o script.")
         return
-
-    # 2) Adiciona indicadores técnicos
-    df = TechnicalIndicatorAdder.add_technical_indicators(df)
 
     # 3) Cria labels
     df = LabelCreator.create_labels(df, config.MODEL_DATA_PREDICTION_HORIZON)
@@ -244,7 +159,7 @@ def main():
         return
 
     # 5) Treinamento dos modelos usando Pipeline + ColumnTransformer
-    model_trainer = ModelTrainer(train_data_dir)
+    model_trainer = ModelTrainer(TRAINED_MODELS_DIR)
 
     # Treinamos dois modelos: um para TP e outro para SL
     model_tp = model_trainer.train_model(X_train, y_tp_train, FEATURE_COLUMNS, 'tp')
