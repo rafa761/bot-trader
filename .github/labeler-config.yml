@@ -1,0 +1,31 @@
+version: v1
+
+labels:
+  - label: "feature"
+    sync: true
+    matcher:
+      # Matcher will match on any
+      title: "^feat.*"
+      branch: "^feature/.*"
+      baseBranch: "^feature/.*"
+      commits: "^(F|f)eat.*"
+
+  - label: "bugfix"
+    sync: true
+    matcher:
+      title: "^fix.*"
+      branch: "^bugfix/.*"
+      baseBranch: "^bugfix/.*"
+      commits: "^(F|f)ix.*"
+
+  - label: "refactor"
+    sync: true
+    matcher:
+      title: "^(R|r)efactor.*"
+      commits: "^(R|r)efactor.*"
+
+  - label: "release"
+    sync: true
+    matcher:
+      branch: "^release/.*"
+      baseBranch: "^release/.*"

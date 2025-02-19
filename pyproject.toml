@@ -1,0 +1,38 @@
+[project]
+name = "bot-trader"
+description = "Trader bot Bitcoin"
+requires-python = ">=3.12"
+
+[project.urls]
+Homepage = ""
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+include = '\.pyi?$'
+
+[tool.isort]
+line_length = 120
+py_version = 312
+src_paths = ["src/*"]
+skip_glob = ["docs/*", "src/*/tests/*"]
+known_third_party = ["sqlalchemy", "alembic", "pydantic", "dotenv", "fastapi"]
+multi_line_output = 3
+include_trailing_comma = true
+skip_gitignore = true
+
+[tool.pylint.messages_control]
+disable = "C0330, C0326"
+
+[tool.pylint.format]
+max-line-length = "120"
+
+[tool.mypy]
+plugins = "pydantic.mypy,sqlmypy"
+python_version = "3.12"
+follow_imports = "silent"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_optional = true

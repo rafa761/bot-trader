@@ -1,0 +1,23 @@
+on:
+  pull_request:
+    branches: [ develop, master ]
+    types: [ opened, edited, synchronize, reopened, ready_for_review ]
+
+permissions:
+  contents: read # the config file
+  issues: write # for labeling issues (on: issues)
+  pull-requests: write # for labeling pull requests (on: pull_request_target or on: pull_request)
+  statuses: write # to generate status
+  checks: write # to generate status
+
+jobs:
+  labeler:
+    # Do not run on dependabot's PRs.
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    name: Labeler
+    runs-on: ubuntu-latest
+    steps:
+      - uses: fuxingloh/multi-labeler@v4
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}} # optional, default to '${{ github.token }}'
+          config-path: .github/labeler-config.yml # optional, default to '.github/labeler-config.yml'

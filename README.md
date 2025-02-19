@@ -1,7 +1,12 @@
 # Trading Bot Bitcoin
 Projeto de um bot para fazer trade de bitcoin
 
-# Setup do Projeto
+## Configuração da conta Binance Testnet
+
+1 - Criar conta na [Binance Testnet](https://testnet.binancefuture.com/en/futures/BTCUSDT)
+2 - habilitar o Hedge Mode em "Settings > Position Mode"
+
+## Setup do Projeto
 
 1 - Instalar Python versao 3.12+
 
@@ -10,23 +15,43 @@ Projeto de um bot para fazer trade de bitcoin
 3 - Rodar o seguinte comando instalar as dependencias
 
 ```shell
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-# Estrutura do Trading Bot V1
+## Pre commit hooks
 
-* **config.py** cuida de variáveis de ambiente e configurações.
-* **logger.py** centraliza a configuração de logging.
-* **binance_client.py** encapsula a criação do Client da Binance e métodos de acesso.
-* **data_handler.py** gerencia coleta de dados e atualização do DataFrame histórico.
-* **model_manager.py** carrega/treina modelos e faz predições de TP e SL.
-* **trading_strategy.py** define a lógica de entrada e saída (compra/venda) e o cálculo de quantidade.
-* **trading_bot.py** coordena tudo: WebSocket, coloca ordens, registra trades e faz loop de trading.
-* **dashboard.py** constrói a aplicação Dash e seus callbacks.
-* **main.py** faz a “cola” final: inicia tudo e mantém o fluxo.
+### Instalar
 
+```bash
+pre-commit install
+pre-commit install --hook-type prepare-commit-msg
+```
 
-# Informações extras
+### Atualizar
 
-* Criar conta no ambiente de teste da Binance
-https://testnet.binancefuture.com/en/futures/BTCUSDT
+```bash
+pre-commit autoupdate
+```
+
+## Estrutura do Projeto
+
+```shell
+bot-trader/
+│── docs/                          # Documentação do projeto
+│── src/                           # Código-fonte principal
+│   │── core/                      # Módulo central do bot (configurações e utilitários)
+│   │   │── config.py              # Configurações do bot (Pydantic V2)
+│   │   │── constants.py           # Definição de constantes globais
+│   │   │── logger.py              # Configuração do logging
+│   │── models/                    # Módulo para machine learning
+│   │   │── ai_training.py         # Treinamento dos modelos de IA
+│   │   │── model_manager.py       # Gerenciamento do modelo de IA (carregamento, predição)
+│   │── services/                  # Serviços principais do bot
+│   │   │── binance_client.py      # Cliente para integração com a Binance
+│   │   │── trading_strategy.py    # Implementação da lógica de trading
+│   │── repositories/              # Camada de abstração de dados
+│   │   │── data_handler.py        # Coleta e manipulação de dados do mercado
+│   │── dashboard/                 # Interface web (Dash) para visualizar dados do bot
+│   │   │── dashboard.py           # Aplicação Dash para gráficos de candles e logs
+│   │── main.py                    # Ponto de entrada principal do bot
+```
