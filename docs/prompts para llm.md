@@ -34,3 +34,4 @@ take-profit e alocação de capital.
 Testes e validação: Sugira abordagens para testar o bot de forma abrangente, incluindo testes unitários, de integração e
 simulações de mercado.
 
+Aguarde meu próximo prompt

@@ -1,14 +1,17 @@
 from pathlib import Path
 
 FEATURE_COLUMNS = [
-    'sma_short',
-    'sma_long',
-    'rsi',
-    'atr',
-    'volume',
-    'macd',
-    'boll_hband',
-    'boll_lband'
+    "sma_short",
+    "sma_long",
+    "rsi",
+    "atr",
+    "volume",
+    "macd",
+    "boll_hband",
+    "boll_lband",
+    "ichimoku_conversion",
+    "volume_macd",
+    "is_hammer",
 ]
 
 # Define o caminho absoluto para a pasta de modelos treinados

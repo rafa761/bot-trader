@@ -160,7 +160,10 @@ class TradingBot:
                             last_row["volume"],
                             last_row["macd"],
                             last_row["boll_hband"],
-                            last_row["boll_lband"]
+                            last_row["boll_lband"],
+                            last_row["ichimoku_conversion"],
+                            last_row["volume_macd"],
+                            last_row["is_hammer"],
                         ]],
                         columns=FEATURE_COLUMNS,
                     )

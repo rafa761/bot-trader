@@ -120,8 +120,24 @@ class TechnicalIndicatorAdder:
             df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
             df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
 
+            # 1. Ichimoku Cloud
+            high_9 = df['high'].rolling(9).max()
+            low_9 = df['low'].rolling(9).min()
+            df['ichimoku_conversion'] = (high_9 + low_9) / 2
+
+            # 2. Volume Weighted MACD
+            df['volume_macd'] = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
+
+            # 3. Padrão Hammer (Candlestick)
+            df['is_hammer'] = ((df['close'] > df['open']) &
+                               (df['close'] - df['low'] > 1.5 * (df['high'] - df['close']))).astype(int)
+
+            logger.info(f"Colunas disponíveis antes de fazer dropna: {list(df.columns)}")
+
             # Garantia de remoção de NaN
             df.dropna(inplace=True)
+
+            logger.info(f"Colunas disponíveis apos de fazer dropna: {list(df.columns)}")
 
             logger.info("Indicadores técnicos adicionados com sucesso.")
 
