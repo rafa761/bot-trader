@@ -189,12 +189,8 @@ class TechnicalIndicatorAdder:
             df['is_hammer'] = ((df['close'] > df['open']) &
                                (df['close'] - df['low'] > 1.5 * (df['high'] - df['close']))).astype(int)
 
-            logger.info(f"Colunas disponíveis antes de fazer dropna: {list(df.columns)}")
-
             # Garantia de remoção de NaN
             df.dropna(inplace=True)
-
-            logger.info(f"Colunas disponíveis apos de fazer dropna: {list(df.columns)}")
 
             logger.info("Indicadores técnicos adicionados com sucesso.")
 
