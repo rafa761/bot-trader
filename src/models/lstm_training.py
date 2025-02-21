@@ -112,23 +112,29 @@ class LSTMModelBuilder:
     """Classe para construção e treinamento de modelos LSTM."""
 
     @staticmethod
-    def build_model(input_shape: tuple[int, int], trial: optuna.Trial | None = None) -> Sequential:
+    def build_model(input_shape: tuple[int, int], params: dict | optuna.Trial | None = None) -> Sequential:
         """
         Constrói o modelo LSTM usando hiperparâmetros do Optuna ou valores padrão simplificados.
 
         Parameters:
             input_shape: Formato dos dados de entrada (lookback, n_features)
-            trial: Trial para otimização de hiperparâmetros (opcional)
+            params: Dicionário de parâmetros ou objeto Trial do Optuna (opcional)
 
         Returns:
             Modelo Keras compilado
         """
-        if trial:
+        if isinstance(params, optuna.Trial):
             # Hiperparâmetros otimizados pelo Optuna
-            n_layers = trial.suggest_int("n_layers", 1, 2)  # Reduzido para 2 camadas máximas
-            n_units = [trial.suggest_int(f"n_units_l{i}", 32, 128) for i in range(n_layers)]  # Menos unidades
-            dropouts = [trial.suggest_float(f"dropout_l{i}", 0.0, 0.3) for i in range(n_layers)]  # Dropout menor
-            learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+            n_layers = params.suggest_int("n_layers", 1, 2)  # Reduzido para 2 camadas máximas
+            n_units = [params.suggest_int(f"n_units_l{i}", 32, 128) for i in range(n_layers)]  # Menos unidades
+            dropouts = [params.suggest_float(f"dropout_l{i}", 0.0, 0.3) for i in range(n_layers)]  # Dropout menor
+            learning_rate = params.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+        elif isinstance(params, dict):
+            # Usar parâmetros pré-definidos (dicionário)
+            n_layers = params.get("n_layers", 1)
+            n_units = [params.get(f"n_units_l{i}", 64) for i in range(n_layers)]
+            dropouts = [params.get(f"dropout_l{i}", 0.2) for i in range(n_layers)]
+            learning_rate = params.get("learning_rate", 0.001)
         else:
             # Configuração padrão simplificada para rapidez
             n_layers = 1  # Apenas uma camada para acelerar
