@@ -10,6 +10,7 @@ import optuna
 import pandas as pd
 import tensorflow as tf
 from binance.client import Client
+from keras import Input
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from keras.layers import LSTM, Dense, Dropout
 from keras.models import Sequential, load_model
