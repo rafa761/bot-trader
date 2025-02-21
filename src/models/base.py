@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import arrow
@@ -76,7 +77,11 @@ class DataCollector:
 
             for file in cache_dir.glob("*.csv"):
                 try:
-                    file_date_str = file.stem.split("-")[0]  # Pegando a data corretamente
+                    match = re.search(r"^\d{4}-\d{2}-\d{2}", file.stem)
+                    if not match:
+                        continue
+
+                    file_date_str = match.group()
                     file_date = arrow.get(file_date_str, "YYYY-MM-DD").date()
 
                     if file_date < retention_date:
