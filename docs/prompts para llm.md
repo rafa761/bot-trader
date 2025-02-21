@@ -31,5 +31,3 @@ Ajude-me a ajustar e otimizar um bot de trading de Bitcoin que estou desenvolven
 5. **Gerenciamento de Risco**: Ajude a implementar ou aprimorar mecanismos de gerenciamento de risco, como stop-loss, take-profit e alocação de capital.
 
 6. **Testes e Validação**: Sugira abordagens para testar o bot de forma abrangente, incluindo testes unitários, de integração e simulações de mercado.
-
-Aguardo seu próximo prompt para fornecer mais detalhes específicos ou o código atual para análise!

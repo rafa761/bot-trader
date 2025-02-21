@@ -146,7 +146,7 @@ class LSTMModelBuilder:
         model = Sequential()
         model.add(Input(shape=input_shape))
         # Primeira camada LSTM
-        model.add(LSTM(n_units[0], return_sequences=(n_layers > 1), input_shape=input_shape))
+        model.add(LSTM(n_units[0], return_sequences=(n_layers > 1)))
         model.add(Dropout(dropouts[0]))
 
         # Camadas adicionais apenas se n_layers > 1
