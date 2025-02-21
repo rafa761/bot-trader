@@ -23,8 +23,8 @@ class LSTMModelManager:
     """
 
     def __init__(self,
-                 tp_model_path=TRAINED_MODELS_DIR / "lstm_model_tp.h5",
-                 sl_model_path=TRAINED_MODELS_DIR / "lstm_model_sl.h5",
+                 tp_model_path=TRAINED_MODELS_DIR / "lstm_model_tp.keras",
+                 sl_model_path=TRAINED_MODELS_DIR / "lstm_model_sl.keras",
                  feature_scaler_path=TRAINED_MODELS_DIR / "scalers/feature_scaler.pkl",
                  tp_scaler_path=TRAINED_MODELS_DIR / "scalers/tp_scaler.pkl",
                  sl_scaler_path=TRAINED_MODELS_DIR / "scalers/sl_scaler.pkl",
@@ -33,8 +33,8 @@ class LSTMModelManager:
         Inicializa o gerenciador de modelos LSTM carregando os modelos treinados e scalers.
 
         Args:
-            tp_model_path: Caminho para o modelo TP (arquivo .h5)
-            sl_model_path: Caminho para o modelo SL (arquivo .h5)
+            tp_model_path: Caminho para o modelo TP (arquivo .keras)
+            sl_model_path: Caminho para o modelo SL (arquivo .keras)
             feature_scaler_path: Caminho para o scaler de features
             tp_scaler_path: Caminho para o scaler de TP
             sl_scaler_path: Caminho para o scaler de SL
@@ -226,8 +226,8 @@ class LSTMModelManager:
             logger.info("Treinamento incremental concluído com sucesso")
 
             # Salvar os modelos atualizados
-            self.tp_model.save(str(TRAINED_MODELS_DIR / 'lstm_model_tp.h5'))
-            self.sl_model.save(str(TRAINED_MODELS_DIR / 'lstm_model_sl.h5'))
+            self.tp_model.save(str(TRAINED_MODELS_DIR / 'lstm_model_tp.keras'))
+            self.sl_model.save(str(TRAINED_MODELS_DIR / 'lstm_model_sl.keras'))
             logger.info("Modelos atualizados salvos")
 
         except Exception as e:

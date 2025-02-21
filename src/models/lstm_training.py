@@ -143,7 +143,7 @@ class LSTMModelBuilder:
             learning_rate = 0.001
 
         model = Sequential()
-
+        model.add(Input(shape=input_shape))
         # Primeira camada LSTM
         model.add(LSTM(n_units[0], return_sequences=(n_layers > 1), input_shape=input_shape))
         model.add(Dropout(dropouts[0]))
@@ -407,7 +407,7 @@ def main() -> None:
 
     logger.info("Treinando modelo TP com os melhores hiperparâmetros")
     model_tp = LSTMModelBuilder.build_model(input_shape, best_params_tp)
-    model_tp_path = str(TRAINED_MODELS_DIR / "lstm_model_tp.h5")
+    model_tp_path = str(TRAINED_MODELS_DIR / "lstm_model_tp.keras")
     history_tp = LSTMModelBuilder.train_model(
         model_tp,
         X_train,
@@ -428,7 +428,7 @@ def main() -> None:
 
     logger.info("Treinando modelo SL com os melhores hiperparâmetros")
     model_sl = LSTMModelBuilder.build_model(input_shape, best_params_sl)
-    model_sl_path = str(TRAINED_MODELS_DIR / "lstm_model_sl.h5")
+    model_sl_path = str(TRAINED_MODELS_DIR / "lstm_model_sl.keras")
     history_sl = LSTMModelBuilder.train_model(
         model_sl,
         X_train,
