@@ -18,7 +18,7 @@ from optuna.integration import TFKerasPruningCallback
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 
-from core.config import config
+from core.config import settings
 from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 from models.base import DataCollector, LabelCreator
@@ -288,7 +288,7 @@ class HyperparameterOptimizer:
         batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])  # Batch sizes maiores para rapidez
 
         callbacks = [
-            EarlyStopping(monitor="val_loss", patience=config.MODEL_PATIENCE, restore_best_weights=True),
+            EarlyStopping(monitor="val_loss", patience=settings.MODEL_PATIENCE, restore_best_weights=True),
             TFKerasPruningCallback(trial, "val_loss"),
         ]
 
@@ -296,7 +296,7 @@ class HyperparameterOptimizer:
             self.X_train,
             self.y_train,
             validation_data=(self.X_val, self.y_val),  # Corrigido: usa atributos da instância
-            epochs=config.MODEL_EPOCHS_OPTUNA,
+            epochs=settings.MODEL_EPOCHS_OPTUNA,
             batch_size=batch_size,
             callbacks=callbacks,
             verbose=0,
@@ -345,9 +345,9 @@ def main() -> None:
         logger.warning(f"Erro ao configurar GPU: {e}")
 
     # Coletar dados históricos da Binance
-    client = Client(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, requests_params={"timeout": 30})
+    client = Client(settings.BINANCE_API_KEY, settings.BINANCE_API_SECRET, requests_params={"timeout": 30})
     data_collector = DataCollector(client)
-    df = data_collector.get_historical_klines(config.SYMBOL, config.INTERVAL, config.MODEL_DATA_TRAINING_START_DATE)
+    df = data_collector.get_historical_klines(settings.SYMBOL, settings.INTERVAL, settings.MODEL_DATA_TRAINING_START_DATE)
 
     if df.empty:
         logger.error("Não foi possível coletar dados históricos. Encerrando.")
@@ -356,12 +356,12 @@ def main() -> None:
     logger.info(f"Dados coletados: {len(df)} registros")
 
     # Reduzir o tamanho do dataset para acelerar (opcional, configurável)
-    if config.MODEL_SAMPLE_FRACTION < 1.0:
-        df = df.sample(frac=config.MODEL_SAMPLE_FRACTION, random_state=42)
-        logger.info(f"Amostra reduzida para {len(df)} registros ({config.MODEL_SAMPLE_FRACTION * 100:.0f}%)")
+    if settings.MODEL_SAMPLE_FRACTION < 1.0:
+        df = df.sample(frac=settings.MODEL_SAMPLE_FRACTION, random_state=42)
+        logger.info(f"Amostra reduzida para {len(df)} registros ({settings.MODEL_SAMPLE_FRACTION * 100:.0f}%)")
 
     # Criar labels para TP e SL
-    df = LabelCreator.create_labels(df, config.MODEL_DATA_PREDICTION_HORIZON)
+    df = LabelCreator.create_labels(df, settings.MODEL_DATA_PREDICTION_HORIZON)
     if df.empty or "TP_pct" not in df.columns:
         logger.error("Falha ao criar labels. Encerrando.")
         return
@@ -374,7 +374,7 @@ def main() -> None:
 
     # Preparar dados
     preprocessor = DataPreprocessor()
-    X_sequences, y_tp, y_sl = preprocessor.create_sequences(df, config.MODEL_DATA_LOOKBACK)
+    X_sequences, y_tp, y_sl = preprocessor.create_sequences(df, settings.MODEL_DATA_LOOKBACK)
     logger.info(f"Sequências criadas: {X_sequences.shape}")
 
     # Dividir em treino, validação e teste (80/10/10)
@@ -404,7 +404,7 @@ def main() -> None:
     # Otimização e treinamento do modelo TP
     logger.info("Iniciando otimização de hiperparâmetros para modelo TP")
     tp_optimizer = HyperparameterOptimizer(X_train, y_tp_train, X_val, y_tp_val, input_shape)
-    best_params_tp = tp_optimizer.optimize(n_trials=config.MODEL_N_TRIALS, study_name="tp_optimization")
+    best_params_tp = tp_optimizer.optimize(n_trials=settings.MODEL_N_TRIALS, study_name="tp_optimization")
 
     logger.info("Treinando modelo TP com os melhores hiperparâmetros")
     model_tp = LSTMModelBuilder.build_model(input_shape, best_params_tp)
@@ -416,16 +416,16 @@ def main() -> None:
         X_val,
         y_tp_val,
         model_tp_path,
-        patience=config.MODEL_PATIENCE,
-        epochs=config.MODEL_EPOCHS_TRAINING,
-        batch_size=best_params_tp.get("batch_size", config.MODEL_BATCH_SIZE_DEFAULT),
+        patience=settings.MODEL_PATIENCE,
+        epochs=settings.MODEL_EPOCHS_TRAINING,
+        batch_size=best_params_tp.get("batch_size", settings.MODEL_BATCH_SIZE_DEFAULT),
     )
     model_tp = load_model(model_tp_path)
 
     # Otimização e treinamento do modelo SL
     logger.info("Iniciando otimização de hiperparâmetros para modelo SL")
     sl_optimizer = HyperparameterOptimizer(X_train, y_sl_train, X_val, y_sl_val, input_shape)
-    best_params_sl = sl_optimizer.optimize(n_trials=config.MODEL_N_TRIALS, study_name="sl_optimization")
+    best_params_sl = sl_optimizer.optimize(n_trials=settings.MODEL_N_TRIALS, study_name="sl_optimization")
 
     logger.info("Treinando modelo SL com os melhores hiperparâmetros")
     model_sl = LSTMModelBuilder.build_model(input_shape, best_params_sl)
@@ -437,9 +437,9 @@ def main() -> None:
         X_val,
         y_sl_val,
         model_sl_path,
-        patience=config.MODEL_PATIENCE,
-        epochs=config.MODEL_EPOCHS_TRAINING,
-        batch_size=best_params_sl.get("batch_size", config.MODEL_BATCH_SIZE_DEFAULT),
+        patience=settings.MODEL_PATIENCE,
+        epochs=settings.MODEL_EPOCHS_TRAINING,
+        batch_size=best_params_sl.get("batch_size", settings.MODEL_BATCH_SIZE_DEFAULT),
     )
     model_sl = load_model(model_sl_path)
 

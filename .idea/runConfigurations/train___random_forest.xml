@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="traderbot - Ai training" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="train - random forest" type="PythonConfigurationType" factoryName="Python">
     <module name="bot-trader" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
@@ -23,7 +23,7 @@
         <ENTRY IS_ENABLED="true" PARSER="runconfig" IS_EXECUTABLE="false" />
       </ENTRIES>
     </EXTENSION>
-    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/models/ai_training.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/models/random_forest/main.py" />
     <option name="PARAMETERS" value="" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />

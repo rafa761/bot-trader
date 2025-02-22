@@ -11,7 +11,7 @@ import sys
 
 import pandas as pd
 
-from core.config import config
+from core.config import settings
 from core.constants import FEATURE_COLUMNS
 from core.logger import logger
 from models.model_manager import ModelManager
@@ -37,11 +37,11 @@ class TradingBot:
         self.strategy = TradingStrategy()
 
         # Parâmetros de configuração
-        self.symbol = config.SYMBOL
-        self.interval = config.INTERVAL
-        self.capital = config.CAPITAL
-        self.leverage = config.LEVERAGE
-        self.risk_per_trade = config.RISK_PER_TRADE
+        self.symbol = settings.SYMBOL
+        self.interval = settings.INTERVAL
+        self.capital = settings.CAPITAL
+        self.leverage = settings.LEVERAGE
+        self.risk_per_trade = settings.RISK_PER_TRADE
 
         # Filtros (tick_size, step_size) para formatar ordens
         self.tick_size, self.step_size = 0.0, 0.0
