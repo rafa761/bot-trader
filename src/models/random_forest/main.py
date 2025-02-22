@@ -31,6 +31,8 @@ def main():
         n_estimators=100,
         max_depth=None,
         min_samples_split=2,
+        min_samples_leaf=2,
+        max_features=1,
         random_state=42,
         feature_columns=FEATURE_COLUMNS
     )
