@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import arrow
@@ -76,7 +77,11 @@ class DataCollector:
 
             for file in cache_dir.glob("*.csv"):
                 try:
-                    file_date_str = file.stem.split("-")[0]  # Pegando a data corretamente
+                    match = re.search(r"^\d{4}-\d{2}-\d{2}", file.stem)
+                    if not match:
+                        continue
+
+                    file_date_str = match.group()
                     file_date = arrow.get(file_date_str, "YYYY-MM-DD").date()
 
                     if file_date < retention_date:
@@ -108,36 +113,80 @@ class TechnicalIndicatorAdder:
         try:
             logger.info("Adicionando indicadores técnicos ao DataFrame.")
 
+            ## Indicadores de Tendência
             df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
             df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
+
+            # Bollinger
+            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=21)
+            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=21)
+
+            # Exponential Moving Average (EMA)
+            # EMA é semelhante à SMA, mas dá mais peso aos preços recentes.
+            df['ema_short'] = ta.trend.EMAIndicator(close=df['close'], window=12).ema_indicator()
+            df['ema_long'] = ta.trend.EMAIndicator(close=df['close'], window=26).ema_indicator()
+
+            # Parabolic SAR
+            # Indicador que ajuda a identificar a direção da tendência e possíveis pontos de reversão.
+            df['parabolic_sar'] = ta.trend.PSARIndicator(high=df['high'], low=df['low'], close=df['close']).psar()
+
+            ## Indicadores de Momento
             df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
+
+            # Stochastic Oscillator
+            # Mede a posição do preço de fechamento em relação à faixa de preço em um determinado período.
+            df['stoch_k'] = ta.momentum.StochasticOscillator(high=df['high'], low=df['low'], close=df['close'],
+                                                             window=14).stoch()
+            df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
+
+            # Commodity Channel Index (CCI)
+            # Mede a variação do preço em relação à sua média estatística.
+            df['cci'] = ta.trend.CCIIndicator(high=df['high'], low=df['low'], close=df['close'], window=20).cci()
+
+            ## Indicadores de Volatilidade
+            df["macd"] = ta.trend.macd_diff(df["close"])
+
+            # Volume Weighted MACD
+            df['volume_macd'] = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
+
             df['atr'] = ta.volatility.AverageTrueRange(
                 high=df['high'],
                 low=df['low'], close=df['close'],
                 window=14
             ).average_true_range()
-            df["macd"] = ta.trend.macd_diff(df["close"])
-            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
-            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
 
-            # 1. Ichimoku Cloud
-            high_9 = df['high'].rolling(9).max()
-            low_9 = df['low'].rolling(9).min()
-            df['ichimoku_conversion'] = (high_9 + low_9) / 2
+            # Bollinger Bands Width
+            # Mede a largura das bandas de Bollinger, indicando a volatilidade do mercado.
+            df['boll_width'] = df['boll_hband'] - df['boll_lband']
 
-            # 2. Volume Weighted MACD
-            df['volume_macd'] = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
+            # Keltner Channels
+            # Outro indicador de volatilidade que usa ATR para definir os canais
+            df['keltner_hband'] = ta.volatility.KeltnerChannel(high=df['high'], low=df['low'], close=df['close'],
+                                                               window=20).keltner_channel_hband()
+            df['keltner_lband'] = ta.volatility.KeltnerChannel(high=df['high'], low=df['low'], close=df['close'],
+                                                               window=20).keltner_channel_lband()
 
-            # 3. Padrão Hammer (Candlestick)
-            df['is_hammer'] = ((df['close'] > df['open']) &
-                               (df['close'] - df['low'] > 1.5 * (df['high'] - df['close']))).astype(int)
+            ## Indicadores de Volume
+            # On-Balance Volume (OBV)
+            # Mede o fluxo de volume positivo e negativo para prever mudanças de preço.
+            df['obv'] = ta.volume.OnBalanceVolumeIndicator(close=df['close'], volume=df['volume']).on_balance_volume()
 
-            logger.info(f"Colunas disponíveis antes de fazer dropna: {list(df.columns)}")
+            # Volume Weighted Average Price (VWAP)
+            # Média ponderada pelo volume, útil para identificar níveis de suporte e resistência.
+            df['vwap'] = ta.volume.VolumeWeightedAveragePrice(high=df['high'], low=df['low'], close=df['close'],
+                                                              volume=df['volume'],
+                                                              window=14).volume_weighted_average_price()
+
+            ## Outros indicadores
+            # Average Directional Index (ADX)
+            df['adx'] = ta.trend.ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14).adx()
+
+            # Rate of Change (ROC)
+            # Mede a variação percentual do preço em relação ao preço de um período anterior.
+            df['roc'] = ta.momentum.ROCIndicator(close=df['close'], window=12).roc()
 
             # Garantia de remoção de NaN
             df.dropna(inplace=True)
-
-            logger.info(f"Colunas disponíveis apos de fazer dropna: {list(df.columns)}")
 
             logger.info("Indicadores técnicos adicionados com sucesso.")
 

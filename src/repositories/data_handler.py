@@ -15,6 +15,7 @@ from binance.exceptions import BinanceAPIException
 from ta import trend, momentum, volatility
 
 from core.logger import logger
+from models.base import TechnicalIndicatorAdder
 from services.binance_client import BinanceClient
 
 
@@ -35,6 +36,7 @@ class DataHandler:
         self.client = binance_client
         self.historical_df = pd.DataFrame()
         self.data_lock = threading.Lock()
+        self.technical_indicator_adder = TechnicalIndicatorAdder()
 
     async def get_latest_data(self, symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
         """
@@ -89,47 +91,8 @@ class DataHandler:
                 df.drop_duplicates(subset="timestamp", keep="last", inplace=True)
                 df.sort_values(by="timestamp", inplace=True)
                 df.reset_index(drop=True, inplace=True)
-                df = self.add_technical_indicators(df)
+                df = self.technical_indicator_adder.add_technical_indicators(df)
                 self.historical_df = df
         except Exception as e:
             logger.error(f"Erro ao atualizar histórico: {e}", exc_info=True)
 
-    def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Adiciona indicadores técnicos usando a biblioteca 'ta' ao DataFrame fornecido.
-
-        :param df: DataFrame com colunas [timestamp, open, high, low, close, volume]
-        :return: O mesmo DataFrame com colunas extras de indicadores técnicos
-        """
-        try:
-            df["sma_short"] = trend.sma_indicator(df["close"], window=5)
-            df["sma_long"] = trend.sma_indicator(df["close"], window=10)
-            df["rsi"] = momentum.rsi(df["close"], window=14)
-            if len(df) >= 14:
-                df["atr"] = volatility.AverageTrueRange(
-                    high=df["high"],
-                    low=df["low"],
-                    close=df["close"],
-                    window=14
-                ).average_true_range()
-            df["macd"] = trend.macd_diff(df["close"])
-            df["boll_hband"] = volatility.bollinger_hband(df["close"], window=20)
-            df["boll_lband"] = volatility.bollinger_lband(df["close"], window=20)
-
-            # 1. Ichimoku Cloud
-            high_9 = df['high'].rolling(9).max()
-            low_9 = df['low'].rolling(9).min()
-            df['ichimoku_conversion'] = (high_9 + low_9) / 2
-
-            # 2. Volume Weighted MACD
-            df['volume_macd'] = trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
-
-            # 3. Padrão Hammer (Candlestick)
-            df['is_hammer'] = ((df['close'] > df['open']) &
-                               (df['close'] - df['low'] > 1.5 * (df['high'] - df['close']))).astype(int)
-
-            df.dropna(inplace=True)
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao calcular indicadores: {e}", exc_info=True)
-            return df

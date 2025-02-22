@@ -91,7 +91,8 @@ class TradingBot:
                     # Carrega 1000 candles iniciais
                     large_df = await self.data_handler.get_latest_data(self.symbol, self.interval, limit=1000)
                     with self.data_handler.data_lock:
-                        self.data_handler.historical_df = self.data_handler.add_technical_indicators(large_df)
+                        self.data_handler.historical_df = self.data_handler.technical_indicator_adder.add_technical_indicators(
+                            large_df)
                 else:
                     # Atualiza candle a candle
                     for i in range(len(new_data)):
@@ -155,15 +156,25 @@ class TradingBot:
                         [[
                             last_row["sma_short"],
                             last_row["sma_long"],
+                            last_row["ema_short"],
+                            last_row["ema_long"],
+                            last_row["parabolic_sar"],
                             last_row["rsi"],
-                            last_row["atr"],
-                            last_row["volume"],
+                            last_row["stoch_k"],
+                            last_row["stoch_d"],
+                            last_row["cci"],
                             last_row["macd"],
+                            last_row["volume_macd"],
+                            last_row["atr"],
                             last_row["boll_hband"],
                             last_row["boll_lband"],
-                            last_row["ichimoku_conversion"],
-                            last_row["volume_macd"],
-                            last_row["is_hammer"],
+                            last_row["boll_width"],
+                            last_row["keltner_hband"],
+                            last_row["keltner_lband"],
+                            last_row["obv"],
+                            last_row["vwap"],
+                            last_row["adx"],
+                            last_row["roc"],
                         ]],
                         columns=FEATURE_COLUMNS,
                     )
@@ -180,12 +191,12 @@ class TradingBot:
                             side = "BUY"
                             position_side = "LONG"
                             tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
-                            sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.02)
+                            sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
                         else:  # SHORT
                             side = "SELL"
                             position_side = "SHORT"
                             tp_factor = 1 - max(abs(predicted_tp_pct) / 100, 0.02)
-                            sl_factor = 1 + max(abs(predicted_sl_pct) / 100, 0.02)
+                            sl_factor = 1 + max(abs(predicted_sl_pct) / 100, 0.005)
 
                         tp_price = current_price * tp_factor
                         sl_price = current_price * sl_factor
