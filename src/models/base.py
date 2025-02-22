@@ -79,6 +79,7 @@ class DataCollector:
                 try:
                     match = re.search(r"^\d{4}-\d{2}-\d{2}", file.stem)
                     if not match:
+                        logger.warning(f"Nome de arquivo inválido, não foi possível fazer exclusão: {file}")
                         continue
 
                     file_date_str = match.group()
