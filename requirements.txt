@@ -3,6 +3,7 @@ certifi==2025.1.31
 dash==2.18.2
 dash-bootstrap-components==1.7.1
 joblib==1.4.2
+keras==3.8.0
 keras_tuner==1.4.7
 matplotlib==3.10.0
 numpy>=2.0.0
@@ -15,5 +16,6 @@ pydantic-settings==2.7.1
 python-binance==1.0.27
 python-dotenv==1.0.1
 requests==2.32.3
+scikit-learn==1.6.1
 ta==0.11.0
 tensorflow==2.18.0
