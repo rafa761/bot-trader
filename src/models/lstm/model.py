@@ -1,4 +1,5 @@
 from tensorflow.keras import Sequential
+
 from models.base.model import BaseModel, ModelConfig
 
 

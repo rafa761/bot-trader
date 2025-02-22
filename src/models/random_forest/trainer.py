@@ -1,7 +1,6 @@
-from typing import Optional
 import pandas as pd
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error
+
 from models.base.trainer import BaseTrainer
 from models.random_forest.model import RandomForestModel
 

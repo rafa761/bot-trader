@@ -1,19 +1,21 @@
 from pathlib import Path
-from typing import Generic, TypeVar
+
 import pandas as pd
 
 from core.logger import logger
-from models.base.schemas import ModelConfig
 from models.base.model import BaseModel
+from models.base.schemas import ModelConfig
 from models.base.trainer import BaseTrainer
+
 
 class ModelManager:
     """Gerenciador genérico para orquestrar o treinamento de modelos"""
+
     def __init__(
-        self,
-        model: BaseModel,
-        trainer: BaseTrainer,
-        config: ModelConfig
+            self,
+            model: BaseModel,
+            trainer: BaseTrainer,
+            config: ModelConfig
     ):
         self.model = model
         self.trainer = trainer
@@ -21,11 +23,11 @@ class ModelManager:
         self.metrics: dict | None = None
 
     def execute_full_pipeline(
-        self,
-        data: pd.DataFrame,
-        feature_columns: list[str],
-        target_column: str,
-        save_path: Path
+            self,
+            data: pd.DataFrame,
+            feature_columns: list[str],
+            target_column: str,
+            save_path: Path
     ) -> dict:
         """Executa o pipeline completo de treinamento"""
         try:
@@ -64,8 +66,8 @@ class ModelManager:
     @staticmethod
     def _split_data(
             X: pd.DataFrame,
-        y: pd.Series,
-        test_size: float = 0.2
+            y: pd.Series,
+            test_size: float = 0.2
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """Método interno para divisão dos dados"""
         logger.info("Dividindo os dados...")
@@ -83,4 +85,3 @@ class ModelManager:
             raise RuntimeError(f"Erro ao dividir os dados: {e}")
 
         return splitted_data
-

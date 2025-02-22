@@ -1,11 +1,9 @@
-import pandas as pd
 from binance.client import Client
-from sklearn.model_selection import train_test_split
 
 from core.config import settings
 from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
-from models.base.data_handlers import DataCollector, LabelCreator, DataCollectorConfig
+from models.base.data_handlers import DataCollector, LabelCreator
 from models.managers.model_manager import ModelManager
 from models.random_forest import RandomForestModel, RandomForestTrainer, RandomForestConfig
 

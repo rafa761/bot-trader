@@ -1,10 +1,11 @@
 from pathlib import Path
+
 import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
+
 from models.base.model import BaseModel
-from models.base.schemas import ModelConfig
 from models.random_forest.schemas import RandomForestConfig
 
 

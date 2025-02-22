@@ -5,11 +5,12 @@ import arrow
 import pandas as pd
 import ta
 from binance import Client, BinanceAPIException
+from pydantic import BaseModel, Field
 
+from core.config import settings
 from core.constants import TRAIN_DATA_DIR
 from core.logger import logger
-from pydantic import BaseModel, Field
-from core.config import settings
+
 
 class DataCollectorConfig(BaseModel):
     """Configuração base para coleta de dados"""
@@ -39,9 +40,16 @@ class DataCollector:
                 df = pd.read_csv(filepath, sep=';', encoding='utf-8', parse_dates=['timestamp'], index_col='timestamp')
                 return df
 
-            logger.info(f"Coletando dados para {self.config.symbol} - Intervalo: {self.config.interval} - Início: {self.config.start_str}")
+            logger.info(f"Coletando dados para {self.config.symbol} - "
+                        f"Intervalo: {self.config.interval} - "
+                        f"Início: {self.config.start_str}")
 
-            klines = self.client.get_historical_klines(self.config.symbol, self.config.interval, self.config.start_str, self.config.end_str)
+            klines = self.client.get_historical_klines(
+                self.config.symbol,
+                self.config.interval,
+                self.config.start_str,
+                self.config.end_str
+            )
             df = self._process_klines(klines)
 
             logger.info(f"Coleta concluída: {len(df)} registros.")
@@ -118,6 +126,7 @@ class DataCollector:
             logger.info(f"Dados salvos em {filepath}")
         except Exception as e:
             logger.error(f"Erro ao salvar CSV: {e}")
+
 
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração para indicadores técnicos"""
@@ -290,10 +299,12 @@ class TechnicalIndicatorAdder:
             logger.error(f"Erro ao adicionar indicadores técnicos: {e}")
             return df
 
+
 class LabelConfig(BaseModel):
     """Configuração para criação de labels"""
     horizon: int = Field(12, gt=0, description="Horizonte de previsão em períodos")
     min_price_move: float = Field(0.5, description="Movimento mínimo percentual para considerar sinal")
+
 
 class LabelCreator:
     @classmethod

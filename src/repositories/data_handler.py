@@ -12,7 +12,6 @@ import threading
 import pandas as pd
 import requests
 from binance.exceptions import BinanceAPIException
-from ta import trend, momentum, volatility
 
 from core.logger import logger
 from models.base import TechnicalIndicatorAdder
@@ -95,4 +94,3 @@ class DataHandler:
                 self.historical_df = df
         except Exception as e:
             logger.error(f"Erro ao atualizar histórico: {e}", exc_info=True)
-
