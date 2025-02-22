@@ -146,6 +146,9 @@ class TechnicalIndicatorAdder:
             ## Indicadores de Volatilidade
             df["macd"] = ta.trend.macd_diff(df["close"])
 
+            # Volume Weighted MACD
+            df['volume_macd'] = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
+
             df['atr'] = ta.volatility.AverageTrueRange(
                 high=df['high'],
                 low=df['low'], close=df['close'],
@@ -181,18 +184,6 @@ class TechnicalIndicatorAdder:
             # Rate of Change (ROC)
             # Mede a variação percentual do preço em relação ao preço de um período anterior.
             df['roc'] = ta.momentum.ROCIndicator(close=df['close'], window=12).roc()
-
-            # 1. Ichimoku Cloud
-            high_9 = df['high'].rolling(9).max()
-            low_9 = df['low'].rolling(9).min()
-            df['ichimoku_conversion'] = (high_9 + low_9) / 2
-
-            # 2. Volume Weighted MACD
-            df['volume_macd'] = ta.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
-
-            # 3. Padrão Hammer (Candlestick)
-            df['is_hammer'] = ((df['close'] > df['open']) &
-                               (df['close'] - df['low'] > 1.5 * (df['high'] - df['close']))).astype(int)
 
             # Garantia de remoção de NaN
             df.dropna(inplace=True)

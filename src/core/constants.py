@@ -11,6 +11,7 @@ FEATURE_COLUMNS = [
     "stoch_d",
     "cci",
     "macd",
+    "volume_macd",
     "atr",
     "boll_hband",
     "boll_lband",
@@ -21,9 +22,6 @@ FEATURE_COLUMNS = [
     "vwap",
     "adx",
     "roc",
-    "ichimoku_conversion",
-    "volume_macd",
-    "is_hammer",
 ]
 
 # Define o caminho absoluto para a pasta de modelos treinados

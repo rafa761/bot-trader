@@ -164,6 +164,7 @@ class TradingBot:
                             last_row["stoch_d"],
                             last_row["cci"],
                             last_row["macd"],
+                            last_row["volume_macd"],
                             last_row["atr"],
                             last_row["boll_hband"],
                             last_row["boll_lband"],
@@ -174,9 +175,6 @@ class TradingBot:
                             last_row["vwap"],
                             last_row["adx"],
                             last_row["roc"],
-                            last_row["ichimoku_conversion"],
-                            last_row["volume_macd"],
-                            last_row["is_hammer"],
                         ]],
                         columns=FEATURE_COLUMNS,
                     )
