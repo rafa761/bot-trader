@@ -113,13 +113,13 @@ class TechnicalIndicatorAdder:
         try:
             logger.info("Adicionando indicadores técnicos ao DataFrame.")
 
-            # Bollinger
-            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=20)
-            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=20)
-
             ## Indicadores de Tendência
             df['sma_short'] = ta.trend.SMAIndicator(close=df['close'], window=10).sma_indicator()
             df['sma_long'] = ta.trend.SMAIndicator(close=df['close'], window=50).sma_indicator()
+
+            # Bollinger
+            df["boll_hband"] = ta.volatility.bollinger_hband(df["close"], window=21)
+            df["boll_lband"] = ta.volatility.bollinger_lband(df["close"], window=21)
 
             # Exponential Moving Average (EMA)
             # EMA é semelhante à SMA, mas dá mais peso aos preços recentes.

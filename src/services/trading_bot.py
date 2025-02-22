@@ -193,12 +193,12 @@ class TradingBot:
                             side = "BUY"
                             position_side = "LONG"
                             tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
-                            sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.02)
+                            sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
                         else:  # SHORT
                             side = "SELL"
                             position_side = "SHORT"
                             tp_factor = 1 - max(abs(predicted_tp_pct) / 100, 0.02)
-                            sl_factor = 1 + max(abs(predicted_sl_pct) / 100, 0.02)
+                            sl_factor = 1 + max(abs(predicted_sl_pct) / 100, 0.005)
 
                         tp_price = current_price * tp_factor
                         sl_price = current_price * sl_factor
