@@ -1,3 +1,4 @@
+import tempfile
 from pathlib import Path
 
 FEATURE_COLUMNS = [
@@ -36,3 +37,7 @@ TRAINED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 # Define o caminho absoluto para a pasta de dados de treino
 TRAIN_DATA_DIR = Path(__file__).resolve().parent.parent / "train_data"
 TRAIN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Define o caminho absoluto para a pasta de cache
+CACHE_DIR = Path(tempfile.gettempdir()) / 'traderbot_cache'
+CACHE_DIR.mkdir(parents=True, exist_ok=True)

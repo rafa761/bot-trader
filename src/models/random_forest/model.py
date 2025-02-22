@@ -2,11 +2,15 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from joblib import Memory
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
 
+from core.constants import CACHE_DIR
 from models.base.model import BaseModel
 from models.random_forest.schemas import RandomForestConfig
+
+memory = Memory(location=CACHE_DIR, verbose=0)
 
 
 class RandomForestModel(BaseModel):
@@ -24,9 +28,13 @@ class RandomForestModel(BaseModel):
                 n_estimators=self.config.n_estimators,
                 max_depth=self.config.max_depth,
                 min_samples_split=self.config.min_samples_split,
+                min_samples_leaf=self.config.min_samples_leaf,
+                max_features=self.config.max_features,
                 random_state=self.config.random_state
             ))
-        ])
+        ],
+            memory=memory
+        )
 
     def predict(self, input_data: pd.DataFrame) -> pd.Series:
         """Executa previsões"""
