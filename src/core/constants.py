@@ -2,6 +2,11 @@ import tempfile
 from pathlib import Path
 
 FEATURE_COLUMNS = [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
     "sma_short",
     "sma_long",
     "ema_short",

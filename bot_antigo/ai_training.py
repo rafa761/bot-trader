@@ -98,7 +98,7 @@ def create_labels(df, horizon=12):
 
     :param df: DataFrame com dados históricos e indicadores técnicos.
     :param horizon: Número de períodos futuros para considerar ao definir TP e SL.
-    :return: DataFrame com novas colunas 'TP_pct' e 'SL_pct'.
+    :return: DataFrame com novas colunas 'take_profit_pct' e 'stop_loss_pct'.
     """
     try:
         logging.info(f"Criando labels para TP e SL com horizon={horizon} períodos.")
@@ -106,10 +106,10 @@ def create_labels(df, horizon=12):
         df['future_low'] = df['low'].rolling(window=horizon).min().shift(-horizon)
 
         # Definir TP como o percentual de aumento até o máximo futuro
-        df['TP_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
+        df['take_profit_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
 
         # Definir SL como o percentual de queda até o mínimo futuro
-        df['SL_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
+        df['stop_loss_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
 
         # Remover colunas auxiliares
         df.drop(['future_high', 'future_low'], axis=1, inplace=True)
@@ -134,8 +134,8 @@ def preprocess_data(df, feature_columns):
     try:
         logging.info("Iniciando pré-processamento dos dados.")
         X = df[feature_columns]
-        y_tp = df['TP_pct']
-        y_sl = df['SL_pct']
+        y_tp = df['take_profit_pct']
+        y_sl = df['stop_loss_pct']
 
         # Inicializar os scalers
         scaler_X = StandardScaler()
@@ -151,8 +151,8 @@ def preprocess_data(df, feature_columns):
 
         # Concatenar as features e labels em um novo DataFrame
         data_scaled = pd.DataFrame(X_scaled, columns=feature_columns, index=df.index)
-        data_scaled['TP_pct'] = y_tp_scaled
-        data_scaled['SL_pct'] = y_sl_scaled
+        data_scaled['take_profit_pct'] = y_tp_scaled
+        data_scaled['stop_loss_pct'] = y_sl_scaled
 
         logging.info("Pré-processamento concluído com sucesso.")
         return scaler_X, scaler_y_tp, scaler_y_sl, data_scaled
@@ -173,8 +173,8 @@ def split_data(data_scaled, feature_columns, test_size=0.2):
     try:
         logging.info("Dividindo os dados em conjuntos de treino e teste.")
         X = data_scaled[feature_columns]
-        y_tp = data_scaled['TP_pct']
-        y_sl = data_scaled['SL_pct']
+        y_tp = data_scaled['take_profit_pct']
+        y_sl = data_scaled['stop_loss_pct']
 
         # Dividir os dados em treino e teste
         X_train, X_test, y_tp_train, y_tp_test = train_test_split(X, y_tp, test_size=test_size, shuffle=False)

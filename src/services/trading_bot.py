@@ -1,21 +1,13 @@
-# trading_bot.py
-
-"""
-Este módulo coordena o loop principal de trading, integrando o DataHandler,
-ModelManager, TradingStrategy e BinanceClient.
-Lida com a criação de ordens, registro de trades e todo o fluxo assíncrono.
-"""
-
 import asyncio
 import sys
 
 import pandas as pd
 
 from core.config import settings
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
-from models.model_manager import ModelManager
-from repositories.data_handler import DataHandler
+from models.managers.model_manager import ModelManager
+from repositories.data_handler import DataHandler, LabelCreator
 from services.binance_client import BinanceClient
 from services.trading_strategy import TradingStrategy
 
@@ -26,28 +18,24 @@ class TradingBot:
     DataHandler, ModelManager, TradingStrategy e BinanceClient.
     """
 
-    def __init__(self):
+    def __init__(self, tp_model_manager: ModelManager, sl_model_manager: ModelManager):
         """
-        Construtor que inicializa as classes auxiliares e
-        configura variáveis necessárias.
+        Construtor que inicializa as classes auxiliares e configura variáveis necessárias.
+
+        :param tp_model_manager: Gerenciador do modelo para Take Profit
+        :param sl_model_manager: Gerenciador do modelo para Stop Loss
         """
         self.binance_client = BinanceClient()
         self.data_handler = DataHandler(self.binance_client)
-        self.model_manager = ModelManager()
+        self.tp_model_manager = tp_model_manager
+        self.sl_model_manager = sl_model_manager
         self.strategy = TradingStrategy()
-
-        # Parâmetros de configuração
-        self.symbol = settings.SYMBOL
-        self.interval = settings.INTERVAL
-        self.capital = settings.CAPITAL
-        self.leverage = settings.LEVERAGE
-        self.risk_per_trade = settings.RISK_PER_TRADE
 
         # Filtros (tick_size, step_size) para formatar ordens
         self.tick_size, self.step_size = 0.0, 0.0
 
-        # Eventual controle de retreinamento
-        self.model_initialized = True  # Assume que os modelos já existem
+        # Controle de retreinamento
+        self.models_trained = False
         self.training_interval = 50
         self.cycle_count = 0
 
@@ -58,16 +46,69 @@ class TradingBot:
         Inicializa os filtros (tickSize e stepSize) e tenta ajustar alavancagem
         no par de trading configurado.
         """
-        self.tick_size, self.step_size = self.binance_client.get_symbol_filters(self.symbol)
+        self.tick_size, self.step_size = self.binance_client.get_symbol_filters(settings.SYMBOL)
 
         if not self.tick_size or not self.step_size:
             logger.error("Não foi possível obter tickSize/stepSize. Encerrando.")
             sys.exit(1)
 
-        logger.info(f"{self.symbol} -> tickSize={self.tick_size}, stepSize={self.step_size}")
+        logger.info(f"{settings.SYMBOL} -> tickSize={self.tick_size}, stepSize={self.step_size}")
 
         # Define alavancagem
-        self.binance_client.set_leverage(self.symbol, self.leverage)
+        self.binance_client.set_leverage(settings.SYMBOL, settings.LEVERAGE)
+
+    async def train_models(self, df_train: pd.DataFrame) -> None:
+        """
+        Treina os modelos de TP e SL com os dados fornecidos.
+
+        :param df_train: DataFrame com features e alvos
+        """
+        logger.info("Treinando modelos TP e SL...")
+
+        # 2. Criação de labels
+        df_train = LabelCreator.create_labels(df_train)
+        if df_train.empty:
+            logger.error("Não foi possível criar labels. Encerrando.")
+            return
+
+        df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
+
+        features = df_train[FEATURE_COLUMNS].copy()
+        features.dropna(inplace=True)
+        target_tp = df_train["pct_change_next"].copy()
+        target_sl = df_train["pct_change_next"].copy()
+
+        min_len = min(len(features), len(target_tp))
+        features = features.iloc[:min_len]
+        target_tp = target_tp.iloc[:min_len]
+        target_sl = target_sl.iloc[:min_len]
+
+        # Remove última linha pois shift(-1) gera NaN no final
+        target_tp = target_tp.iloc[:-1]
+        target_sl = target_sl.iloc[:-1]
+
+        target_tp = df_train["pct_change_next"]  # Pode ser ajustado conforme sua lógica
+        target_sl = df_train["pct_change_next"]  # Pode ser ajustado conforme sua lógica
+
+        # Treinamento do modelo TP
+        tp_metrics = self.tp_model_manager.execute_full_pipeline(
+            data=df_train,
+            feature_columns=FEATURE_COLUMNS,
+            target_column="pct_change_next",
+            save_path=TRAINED_MODELS_DIR,
+        )
+        logger.info(f"Modelo TP treinado com métricas: {tp_metrics}")
+
+        # Treinamento do modelo SL
+        sl_metrics = self.sl_model_manager.execute_full_pipeline(
+            data=df_train,
+            feature_columns=FEATURE_COLUMNS,
+            target_column="pct_change_next",
+            save_path=TRAINED_MODELS_DIR,
+        )
+        logger.info(f"Modelo SL treinado com métricas: {sl_metrics}")
+
+        self.models_trained = True
 
     async def run(self) -> None:
         """
@@ -84,12 +125,12 @@ class TradingBot:
             logger.debug(f"Iniciando ciclo {self.cycle_count}")
 
             # Passo 1: Obter dados recentes
-            logger.info(f"Coletando dados do intervalo {self.interval}")
-            new_data = await self.data_handler.get_latest_data(self.symbol, self.interval, limit=2)
+            logger.info(f"Coletando dados do intervalo {settings.INTERVAL}")
+            new_data = await self.data_handler.get_latest_data(settings.SYMBOL, settings.INTERVAL, limit=2)
             if not new_data.empty:
                 if self.data_handler.historical_df.empty:
                     # Carrega 1000 candles iniciais
-                    large_df = await self.data_handler.get_latest_data(self.symbol, self.interval, limit=1000)
+                    large_df = await self.data_handler.get_latest_data(settings.SYMBOL, settings.INTERVAL, limit=1000)
                     with self.data_handler.data_lock:
                         self.data_handler.historical_df = self.data_handler.technical_indicator_adder.add_technical_indicators(
                             large_df)
@@ -108,43 +149,24 @@ class TradingBot:
                         self.data_handler.update_historical_data(new_row)
                         logger.debug(f"Atualizado candle: {new_row}")
 
-            # Passo 2: Retreinamento periódico (online learning)
-            if (self.cycle_count % self.training_interval) == 0:
+            # Passo 2: Retreinamento periódico
+            if self.models_trained and (self.cycle_count % self.training_interval) == 0:
                 df_train = self.data_handler.historical_df.copy()
                 if len(df_train) >= 300:
-                    logger.info("Treinando modelo")
-                    df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
-
-                    features = df_train[FEATURE_COLUMNS].copy()
-                    features.dropna(inplace=True)
-                    target_tp = df_train["pct_change_next"].copy()
-                    target_sl = df_train["pct_change_next"].copy()
-
-                    min_len = min(len(features), len(target_tp))
-                    features = features.iloc[:min_len]
-                    target_tp = target_tp.iloc[:min_len]
-                    target_sl = target_sl.iloc[:min_len]
-
-                    # Remove última linha pois shift(-1) gera NaN no final
-                    features = features.iloc[:-1]
-                    target_tp = target_tp.iloc[:-1]
-                    target_sl = target_sl.iloc[:-1]
-
-                    self.model_manager.train_models(features, target_tp, target_sl)
-                    logger.info("Modelo treinado com sucesso")
+                    await self.train_models(df_train)
                 else:
                     logger.info("Ainda não há dados suficientes para treinar.")
 
             # Passo 3: Verificar se há posição aberta
-            open_long = self.binance_client.get_open_position_by_side(self.symbol, "LONG")
-            open_short = self.binance_client.get_open_position_by_side(self.symbol, "SHORT")
+            open_long = self.binance_client.get_open_position_by_side(settings.SYMBOL, "LONG")
+            open_short = self.binance_client.get_open_position_by_side(settings.SYMBOL, "SHORT")
 
             if open_long is not None or open_short is not None:
                 logger.info("Já existe posição aberta. Aguardando fechamento para abrir novo trade.")
             else:
                 # Passo 4: Caso não haja posição, checar sinal do modelo
-                if self.model_initialized and not self.data_handler.historical_df.empty:
-                    current_price = self.binance_client.get_futures_last_price(self.symbol)
+                if self.models_trained and not self.data_handler.historical_df.empty:
+                    current_price = self.binance_client.get_futures_last_price(settings.SYMBOL)
                     if current_price <= 0:
                         logger.warning("Falha ao obter last price. Nenhum trade.")
                         await asyncio.sleep(5)
@@ -179,7 +201,9 @@ class TradingBot:
                         columns=FEATURE_COLUMNS,
                     )
 
-                    predicted_tp_pct, predicted_sl_pct = self.model_manager.predict_tp_sl(X_eval)
+                    # Previsões separadas para TP e SL
+                    predicted_tp_pct = self.tp_model_manager.model.predict(X_eval)[0]
+                    predicted_sl_pct = self.sl_model_manager.model.predict(X_eval)[0]
                     logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
 
                     direction = self.strategy.decide_direction(predicted_tp_pct, threshold=0.2)
@@ -203,10 +227,10 @@ class TradingBot:
 
                         # Calcula quantidade
                         qty = self.strategy.calculate_trade_quantity(
-                            capital=self.capital,
+                            capital=settings.CAPITAL,
                             current_price=current_price,
-                            leverage=self.leverage,
-                            risk_per_trade=self.risk_per_trade
+                            leverage=settings.LEVERAGE,
+                            risk_per_trade=settings.RISK_PER_TRADE
                         )
 
                         # Ajusta quantidade
@@ -225,13 +249,13 @@ class TradingBot:
                             f"tp_price={tp_price}, "
                             f"sl_price={sl_price}, "
                             f"current_price={current_price}, "
-                            f"leverage={self.leverage}, "
-                            f"risk_per_trade={self.risk_per_trade}"
+                            f"leverage={settings.LEVERAGE}, "
+                            f"risk_per_trade={settings.RISK_PER_TRADE}"
                         )
                         logger.info(f"Abrindo {direction} c/ qty={qty_adj}, lastPrice={current_price:.2f}...")
 
                         order_resp = self.binance_client.place_order_with_retry(
-                            symbol=self.symbol,
+                            symbol=settings.SYMBOL,
                             side=side,
                             quantity=qty_adj,
                             position_side=position_side,
@@ -295,7 +319,7 @@ class TradingBot:
         # Cria ordem TAKE_PROFIT
         try:
             tp_order = self.binance_client.client.futures_create_order(
-                symbol=self.symbol,
+                symbol=settings.SYMBOL,
                 side=side_for_tp_sl,
                 type="TAKE_PROFIT_MARKET",
                 stopPrice=tp_str,
@@ -309,7 +333,7 @@ class TradingBot:
         # Cria ordem STOP
         try:
             sl_order = self.binance_client.client.futures_create_order(
-                symbol=self.symbol,
+                symbol=settings.SYMBOL,
                 side=side_for_tp_sl,
                 type="STOP_MARKET",
                 stopPrice=sl_str,

@@ -3,9 +3,9 @@ from binance.client import Client
 from core.config import settings
 from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
-from models.base.data_handlers import DataCollector, LabelCreator
 from models.managers.model_manager import ModelManager
 from models.random_forest import RandomForestModel, RandomForestTrainer, RandomForestConfig
+from repositories.data_handler import DataCollector, LabelCreator
 
 
 # ---------------------------- Fluxo Principal ----------------------------
@@ -18,8 +18,8 @@ def main():
         n_estimators=100,
         max_depth=None,
         min_samples_split=2,
-        min_samples_leaf=2,
-        max_features=1,
+        min_samples_leaf=1,
+        max_features="sqrt",
         random_state=42,
         feature_columns=FEATURE_COLUMNS,
     )
@@ -31,8 +31,8 @@ def main():
         n_estimators=100,
         max_depth=None,
         min_samples_split=2,
-        min_samples_leaf=2,
-        max_features=1,
+        min_samples_leaf=1,
+        max_features="sqrt",
         random_state=42,
         feature_columns=FEATURE_COLUMNS
     )
@@ -66,14 +66,14 @@ def main():
         tp_metrics = tp_manager.execute_full_pipeline(
             data=df,
             feature_columns=FEATURE_COLUMNS,
-            target_column='TP_pct',
+            target_column='take_profit_pct',
             save_path=TRAINED_MODELS_DIR
         )
 
         sl_metrics = sl_manager.execute_full_pipeline(
             data=df,
             feature_columns=FEATURE_COLUMNS,
-            target_column='SL_pct',
+            target_column='stop_loss_pct',
             save_path=TRAINED_MODELS_DIR
         )
 
