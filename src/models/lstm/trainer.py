@@ -1,4 +1,4 @@
-# models\lstm\main.py
+# models\lstm\trainer.py
 
 from pathlib import Path
 
@@ -46,12 +46,23 @@ class LSTMTrainer(BaseTrainer):
         Returns:
             Tupla contendo dois arrays numpy: X_seq (sequências de features) e y_seq (alvos correspondentes).
         """
-        X_seq, y_seq = [], []
-        for i in range(len(X) - sequence_length):
-            X_seq.append(X[i:(i + sequence_length)])
-            y_seq.append(y[i + sequence_length])
+        # OTIMIZAÇÃO: Usando stride para reduzir o número de sequências e acelerar o treinamento
+        # stride = 2 significa que pegamos a cada 2 pontos de dados, reduzindo pela metade o número de sequências
+        stride = 2  # OTIMIZAÇÃO: Ajuste esse valor conforme necessário (1 = todas as sequências, 2 = metade, etc.)
 
-        return np.array(X_seq), np.array(y_seq)
+        # OTIMIZAÇÃO: Pré-alocação de memória para melhorar performance
+        n_samples = (len(X) - sequence_length) // stride
+        # Pré-alocar arrays para melhor performance
+        X_seq = np.zeros((n_samples, sequence_length, X.shape[1]), dtype=X.dtype)
+        y_seq = np.zeros((n_samples, y.shape[1]), dtype=y.dtype)
+
+        # Preencher arrays
+        for i in range(n_samples):
+            idx = i * stride
+            X_seq[i] = X[idx:idx + sequence_length]
+            y_seq[i] = y[idx + sequence_length]
+
+        return X_seq, y_seq
 
     def train(self, X_train: pd.DataFrame, y_train: pd.Series, checkpoint_dir: Path = None):
         """
@@ -126,6 +137,8 @@ class LSTMTrainer(BaseTrainer):
                     )
 
             # Treinar modelo
+            # Nota: Removemos os parâmetros workers e use_multiprocessing que não são compatíveis
+            # com a versão atual do TensorFlow que está sendo usada
             self.history = self.model.model.fit(
                 X_sequences,
                 y_sequences,
@@ -187,7 +200,13 @@ class LSTMTrainer(BaseTrainer):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {X_test_seq.shape[2]}"
                     )
 
-            evaluation = self.model.model.evaluate(X_test_seq, y_test_seq)
+            # OTIMIZAÇÃO: Usando batch_size da configuração para avaliação mais eficiente
+            evaluation = self.model.model.evaluate(
+                X_test_seq,
+                y_test_seq,
+                batch_size=self.model.config.batch_size
+            )
+
             metrics = {
                 'test_loss': float(evaluation[0]),
                 'test_mae': float(evaluation[1])

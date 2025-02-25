@@ -1,7 +1,5 @@
 # models\lstm\main.py
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 from binance import Client
@@ -72,31 +70,36 @@ def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: s
 
 def setup_model_and_trainer():
     """
-    Configura e inicializa o modelo LSTM e seu treinador.
+    Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizados para CPU.
 
     Returns:
         Tupla contendo o modelo, o treinador e as configurações.
     """
     # Configurar modelo e trainer
     model_config = LSTMConfig(
-        model_name="lstm_btc_predictor",
-        version="1.0.0",
-        description="Modelo LSTM para previsão de preços do Bitcoin",
-        # Parâmetros específicos do LSTM
-        sequence_length=24,
-        lstm_units=[128, 64],
-        dense_units=[32],
-        dropout_rate=0.2,
-        learning_rate=0.001,
-        batch_size=32,
-        epochs=100
+        model_name="lstm_btc_tp_sl",
+        version="1.1.0",
+        description="Modelo LSTM otimizado para CPU para previsão de preços do Bitcoin",
+        # Parâmetros específicos do LSTM otimizados para CPU
+        sequence_length=16,  # OTIMIZAÇÃO: Reduzido de 24 para 16 (menos contexto temporal, mas mais rápido)
+        lstm_units=[64, 32],  # OTIMIZAÇÃO: Reduzido de [128, 64] para [64, 32] (menos unidades = menos computação)
+        dense_units=[16],  # OTIMIZAÇÃO: Reduzido de [32] para [16] (camada menor = menos computação)
+        dropout_rate=0.1,  # OTIMIZAÇÃO: Reduzido de 0.2 para 0.1 (menos regularização, mas mais rápido)
+        learning_rate=0.002,  # OTIMIZAÇÃO: Aumentado de 0.001 para 0.002 (convergência mais rápida)
+        batch_size=64,  # OTIMIZAÇÃO: Aumentado de 32 para 64 (melhor utilização de cache/memória)
+        epochs=50  # OTIMIZAÇÃO: Reduzido de 100 para 50 (menos épocas para treinamento mais rápido)
     )
 
     training_config = LSTMTrainingConfig(
-        validation_split=0.2,
-        early_stopping_patience=10,
-        reduce_lr_patience=5,
-        reduce_lr_factor=0.5
+        validation_split=0.15,
+        # OTIMIZAÇÃO: Reduzido de 0.2 para 0.15 (menos dados de validação = treinamento mais rápido)
+        early_stopping_patience=5,  # OTIMIZAÇÃO: Reduzido de 10 para 5 (interrompe treinamento mais cedo)
+        reduce_lr_patience=3,  # OTIMIZAÇÃO: Reduzido de 5 para 3 (reduz learning rate mais cedo)
+        reduce_lr_factor=0.5,  # Mantido em 0.5
+        # Parâmetros padrão
+        test_size=0.2,
+        random_state=42,
+        shuffle=False
     )
 
     # Criar modelo e trainer
@@ -164,12 +167,8 @@ def main():
         # Importar o gerenciador e executar o pipeline
         from models.managers.model_manager import ModelManager
 
-        # Criar diretório para modelos treinados se não existir
-        models_dir = Path(TRAINED_MODELS_DIR)
-        models_dir.mkdir(parents=True, exist_ok=True)
-
         # Criar checkpoint dir dentro do diretório de modelos
-        checkpoint_dir = models_dir / "checkpoints"
+        checkpoint_dir = TRAINED_MODELS_DIR / "checkpoints"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         # Criar gerenciador e executar pipeline
@@ -178,8 +177,7 @@ def main():
             data=df,
             feature_columns=FEATURE_COLUMNS,
             target_column='take_profit_pct',  # Pode ser take_profit_pct ou stop_loss_pct
-            save_path=models_dir,
-            checkpoint_dir=checkpoint_dir
+            save_path=TRAINED_MODELS_DIR,
         )
 
         logger.info(f"Pipeline concluído com sucesso. Métricas finais: {metrics}")

@@ -43,7 +43,6 @@ class ModelManager:
             feature_columns: list[str],
             target_column: str,
             save_path: Path,
-            checkpoint_dir: Path = None
     ) -> dict:
         """
         Executa o pipeline completo de treinamento.
@@ -53,7 +52,6 @@ class ModelManager:
             feature_columns: Lista de colunas a serem usadas como features.
             target_column: Coluna a ser usada como alvo.
             save_path: Caminho onde o modelo será salvo.
-            checkpoint_dir: Diretório opcional para salvar checkpoints durante o treinamento.
 
         Returns:
             Dicionário com as métricas de avaliação do modelo.
@@ -75,12 +73,7 @@ class ModelManager:
 
             # 3. Treinamento
             logger.info(f"Treinando o modelo...")
-            # Passando checkpoint_dir para o trainer se ele aceitar esse parâmetro
-            if hasattr(self.trainer.__class__.train,
-                       '__code__') and 'checkpoint_dir' in self.trainer.__class__.train.__code__.co_varnames:
-                self.trainer.train(X_train, y_train)
-            else:
-                self.trainer.train(X_train, y_train)
+            self.trainer.train(X_train, y_train)
             logger.info("Modelo treinado com sucesso.")
 
             # 4. Avaliação
@@ -91,7 +84,7 @@ class ModelManager:
 
             # 5. Salvamento
             logger.info("Salvando o modelo...")
-            model_path = save_path / f"{self.config.model_name}.h5"
+            model_path = save_path / f"{self.config.model_name}.keras"
             self.model.save(model_path)
             logger.info(f"Modelo salvo com sucesso em {model_path}.")
 

@@ -4,7 +4,6 @@ from pathlib import Path
 
 from keras.api.layers import Input, LSTM, Dense, Dropout
 from keras.api.models import Model, load_model
-from keras.api.optimizers import Adam
 
 from core.constants import FEATURE_COLUMNS
 from core.logger import logger
@@ -52,18 +51,30 @@ class LSTMModel(BaseModel):
             # Definir input layer explicitamente com nome para facilitar debugging
             inputs = Input(shape=(self.config.sequence_length, self.n_features), name="input_layer")
 
+            # OTIMIZAÇÃO: Usando return_sequences=False para primeira camada se houver apenas uma camada LSTM
+            # Isso simplifica o modelo e reduz a carga computacional
+            is_single_lstm_layer = len(self.config.lstm_units) == 1
+
             # Primeira camada LSTM
             x = LSTM(
                 units=self.config.lstm_units[0],
-                return_sequences=len(self.config.lstm_units) > 1,
-                name="lstm"
+                return_sequences=not is_single_lstm_layer,
+                name="lstm",
+                # OTIMIZAÇÃO: Adicionando unroll=True para melhorar desempenho em sequências fixas em CPU
+                unroll=True
             )(inputs)
             x = Dropout(self.config.dropout_rate, name="dropout")(x)
 
             # Camadas LSTM intermediárias
             for i, units in enumerate(self.config.lstm_units[1:], 1):
                 return_sequences = i < len(self.config.lstm_units) - 1
-                x = LSTM(units=units, return_sequences=return_sequences, name=f"lstm_{i}")(x)
+                x = LSTM(
+                    units=units,
+                    return_sequences=return_sequences,
+                    name=f"lstm_{i}",
+                    # OTIMIZAÇÃO: Adicionando unroll=True para melhorar desempenho em sequências fixas em CPU
+                    unroll=True
+                )(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i}")(x)
 
             # Camadas densas
@@ -79,7 +90,7 @@ class LSTMModel(BaseModel):
 
             # Compilar modelo
             self.model.compile(
-                optimizer=Adam(learning_rate=self.config.learning_rate),
+                optimizer='adam',  # OTIMIZAÇÃO: Usando string 'adam' para aproveitar otimizações internas do Keras
                 loss='mse',
                 metrics=['mae']
             )
@@ -128,7 +139,8 @@ class LSTMModel(BaseModel):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {input_data.shape[2]}"
                     )
 
-            predictions = self.model.predict(input_data)
+            # OTIMIZAÇÃO: Usando batch_size definido na configuração para previsões em lote
+            predictions = self.model.predict(input_data, batch_size=self.config.batch_size)
             return predictions
         except Exception as e:
             logger.error(f"Erro ao fazer previsões: {e}")

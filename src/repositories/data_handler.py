@@ -1,10 +1,4 @@
-# data_handler.py
-
-"""
-Este módulo gerencia a coleta de dados do histórico (klines) e atualização
-do DataFrame que armazena as informações de preço. Também inclui
-cálculo de indicadores técnicos.
-"""
+# repositories\data_handler.py
 
 import asyncio
 import re
