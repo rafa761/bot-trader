@@ -1,3 +1,5 @@
+# services\trading_bot.py
+
 import asyncio
 import sys
 

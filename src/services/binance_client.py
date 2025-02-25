@@ -1,9 +1,4 @@
-# binance_client.py
-
-"""
-Este módulo encapsula a criação do Client da Binance e métodos de acesso
-relacionados (ordens, preços, posições, etc.).
-"""
+# services\binance_client.py
 
 import time
 
