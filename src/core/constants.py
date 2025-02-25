@@ -1,3 +1,5 @@
+# core\constants.py
+
 import tempfile
 from pathlib import Path
 

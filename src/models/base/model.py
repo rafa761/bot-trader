@@ -1,3 +1,5 @@
+# models\base\model.py
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 

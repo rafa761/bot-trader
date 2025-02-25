@@ -1,3 +1,5 @@
+# models\managers\model_manager.py
+
 from pathlib import Path
 
 import pandas as pd
@@ -9,7 +11,12 @@ from models.base.trainer import BaseTrainer
 
 
 class ModelManager:
-    """Gerenciador genérico para orquestrar o treinamento de modelos"""
+    """
+    Gerenciador genérico para orquestrar o treinamento de modelos.
+
+    Responsável por coordenar o fluxo completo de treinamento, desde a preparação
+    dos dados até a avaliação e salvamento do modelo.
+    """
 
     def __init__(
             self,
@@ -17,6 +24,14 @@ class ModelManager:
             trainer: BaseTrainer,
             config: ModelConfig
     ):
+        """
+        Inicializa o gerenciador com o modelo, treinador e configuração especificados.
+
+        Args:
+            model: Instância do modelo a ser treinado.
+            trainer: Instância do treinador para o modelo.
+            config: Configuração do modelo.
+        """
         self.model = model
         self.trainer = trainer
         self.config = config
@@ -27,11 +42,27 @@ class ModelManager:
             data: pd.DataFrame,
             feature_columns: list[str],
             target_column: str,
-            save_path: Path
+            save_path: Path,
+            checkpoint_dir: Path = None
     ) -> dict:
-        """Executa o pipeline completo de treinamento"""
+        """
+        Executa o pipeline completo de treinamento.
+
+        Args:
+            data: DataFrame com os dados para treinamento.
+            feature_columns: Lista de colunas a serem usadas como features.
+            target_column: Coluna a ser usada como alvo.
+            save_path: Caminho onde o modelo será salvo.
+            checkpoint_dir: Diretório opcional para salvar checkpoints durante o treinamento.
+
+        Returns:
+            Dicionário com as métricas de avaliação do modelo.
+
+        Raises:
+            RuntimeError: Se ocorrer algum erro durante o pipeline.
+        """
         try:
-            logger.info(f"Iniciando pipeline de treinamento do modelo {self.model.config.model_name}...")
+            logger.info(f"Iniciando pipeline de treinamento do modelo {self.config.model_name}...")
 
             # 1. Preparação dos dados
             logger.info("Preparando os dados...")
@@ -44,7 +75,12 @@ class ModelManager:
 
             # 3. Treinamento
             logger.info(f"Treinando o modelo...")
-            self.trainer.train(X_train, y_train)
+            # Passando checkpoint_dir para o trainer se ele aceitar esse parâmetro
+            if hasattr(self.trainer.__class__.train,
+                       '__code__') and 'checkpoint_dir' in self.trainer.__class__.train.__code__.co_varnames:
+                self.trainer.train(X_train, y_train)
+            else:
+                self.trainer.train(X_train, y_train)
             logger.info("Modelo treinado com sucesso.")
 
             # 4. Avaliação
@@ -55,33 +91,58 @@ class ModelManager:
 
             # 5. Salvamento
             logger.info("Salvando o modelo...")
-            self.model.save(save_path / f"{self.config.model_name}.pkl")
-            logger.info("Modelo salvo com sucesso.")
+            model_path = save_path / f"{self.config.model_name}.h5"
+            self.model.save(model_path)
+            logger.info(f"Modelo salvo com sucesso em {model_path}.")
 
             return self.metrics
 
         except Exception as e:
-            raise RuntimeError(f"Falha no pipeline de treinamento: {e}") from e
+            error_msg = f"Falha no pipeline de treinamento: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     @staticmethod
     def _split_data(
             X: pd.DataFrame,
             y: pd.Series,
-            test_size: float = 0.2
+            test_size: float = 0.2,
+            shuffle: bool = False
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-        """Método interno para divisão dos dados"""
+        """
+        Método interno para divisão dos dados em conjuntos de treino e teste.
+
+        Args:
+            X: DataFrame com as features.
+            y: Series com os alvos.
+            test_size: Proporção dos dados a ser usada para teste (0.0 a 1.0).
+            shuffle: Se True, embaralha os dados antes da divisão.
+
+        Returns:
+            Tupla contendo (X_train, X_test, y_train, y_test).
+
+        Raises:
+            RuntimeError: Se ocorrer algum erro durante a divisão.
+        """
         logger.info("Dividindo os dados...")
         try:
-            # Implementação básica - pode ser substituído por estratégia mais complexa
-            test_samples = int(len(X) * test_size)
+            # Para séries temporais, normalmente não embaralhamos os dados
+            if shuffle:
+                from sklearn.model_selection import train_test_split
+                return train_test_split(X, y, test_size=test_size, random_state=42)
+            else:
+                # Implementação básica - para séries temporais
+                test_samples = int(len(X) * test_size)
+                train_size = len(X) - test_samples
 
-            splitted_data = (
-                X.iloc[:-test_samples],
-                X.iloc[-test_samples:],
-                y.iloc[:-test_samples],
-                y.iloc[-test_samples:]
-            )
+                return (
+                    X.iloc[:train_size],
+                    X.iloc[train_size:],
+                    y.iloc[:train_size],
+                    y.iloc[train_size:]
+                )
+
         except Exception as e:
-            raise RuntimeError(f"Erro ao dividir os dados: {e}")
-
-        return splitted_data
+            error_msg = f"Erro ao dividir os dados: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e

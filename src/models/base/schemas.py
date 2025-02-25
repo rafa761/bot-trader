@@ -1,3 +1,5 @@
+# models\base\schemas.py
+
 from pydantic import BaseModel, Field
 
 class ModelConfig(BaseModel):
