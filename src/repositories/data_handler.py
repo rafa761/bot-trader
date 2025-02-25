@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 import arrow
+import numpy as np
 import pandas as pd
 import requests
 import ta
@@ -407,6 +408,10 @@ class LabelCreator:
 
             df['take_profit_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
             df['stop_loss_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
+
+            # Adicionar features de relação entre take profit e stop loss (razão risco/recompensa)
+            df['tp_sl_ratio'] = df['take_profit_pct'] / df['stop_loss_pct']
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
             df.drop(['future_high', 'future_low'], axis=1, inplace=True)
 
