@@ -405,9 +405,10 @@ megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
 /src/train_data/
-/src/trained_models/
-/src/perf_metric_data/
 
-# Arquivos de treinamento Machine learning
-*.pkl
-*.h5
+# Ignorar todos os arquivos na pasta trained_models
+/src/trained_models/*
+
+# Exceções: Incluir apenas os modelos específicos no controle de versão
+!src/trained_models/lstm_btc_stop_loss_pct.keras
+!src/trained_models/lstm_btc_take_profit_pct.keras
