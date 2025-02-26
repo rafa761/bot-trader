@@ -2,6 +2,10 @@
 
 import math
 
+from core.logger import logger
+from services.entry_scorer import EntryScorer
+from services.trend_analyzer import TrendAnalyzer
+
 
 class TradingStrategy:
     """
@@ -30,19 +34,38 @@ class TradingStrategy:
             capital: float,
             current_price: float,
             leverage: float,
-            risk_per_trade: float
+            risk_per_trade: float,
+            atr_value: float = None
     ) -> float:
         """
-        Calcula a quantidade a ser negociada:
-        (capital * risco_por_trade) / current_price * leverage.
-
-        :param capital: Capital total disponível
-        :param current_price: Preço atual do ativo
-        :param leverage: Alavancagem utilizada
-        :param risk_per_trade: Porcentagem do capital a ser arriscado
-        :return: Quantidade calculada em float
+        Calcula a quantidade a ser negociada com ajuste de volatilidade.
         """
         risk_amount = capital * risk_per_trade
+        original_risk = risk_amount
+
+        # Ajuste baseado em ATR
+        if atr_value is not None:
+            atr_percentage = atr_value / current_price * 100
+
+            if atr_percentage > 1.5:  # Alta volatilidade
+                volatility_factor = 0.7
+                risk_amount *= volatility_factor
+                logger.info(
+                    f"ATR alto ({atr_percentage:.2f}%) - "
+                    f"Reduzindo risco de {original_risk:.2f} para {risk_amount:.2f} "
+                    f"({volatility_factor * 100:.0f}% do normal)"
+                )
+            elif atr_percentage < 0.5:  # Baixa volatilidade
+                volatility_factor = 1.3
+                risk_amount *= volatility_factor
+                logger.info(
+                    f"ATR baixo ({atr_percentage:.2f}%) - "
+                    f"Aumentando risco de {original_risk:.2f} para {risk_amount:.2f} "
+                    f"({volatility_factor * 100:.0f}% do normal)"
+                )
+            else:
+                logger.info(f"ATR normal ({atr_percentage:.2f}%) - Mantendo risco padrão")
+
         quantity = (risk_amount / current_price) * leverage
         return quantity
 
@@ -79,3 +102,55 @@ class TradingStrategy:
         :return: Quantidade arredondada
         """
         return math.floor(qty / step_size) * step_size
+
+    def evaluate_entry_quality(
+            self,
+            df,
+            current_price: float,
+            trade_direction: str,
+            entry_threshold: float = 0.7
+    ) -> tuple[bool, float]:
+        """
+        Avalia a qualidade da entrada potencial usando múltiplos critérios.
+
+        Args:
+            df: DataFrame com dados históricos
+            current_price: Preço atual
+            trade_direction: "LONG" ou "SHORT"
+            entry_threshold: Pontuação mínima para considerar a entrada
+
+        Returns:
+            tuple[bool, float]: (Deve entrar, pontuação da entrada)
+        """
+        # 1. Análise de tendência
+        trend = TrendAnalyzer.ema_trend(df)
+        trend_strength = TrendAnalyzer.adx_trend(df)
+
+        # 2. Calcular componentes de score individuais
+        trend_score = EntryScorer.score_trend_alignment(trend, trade_direction)
+        rsi_score = EntryScorer.score_rsi_condition(df, trade_direction)
+        macd_score = EntryScorer.score_macd_signal(df, trade_direction)
+
+        # Logar componentes
+        logger.info(
+            f"Componentes do Score - "
+            f"Alinhamento de Tendência: {trend_score:.2f}, "
+            f"Condição RSI: {rsi_score:.2f}, "
+            f"Sinal MACD: {macd_score:.2f}"
+        )
+
+        # 3. Calcular pontuação geral
+        entry_score = EntryScorer.calculate_entry_score(df, current_price, trade_direction, trend)
+
+        # 4. Penalizar para tendência forte na direção oposta
+        if (trend == "UPTREND" and trade_direction == "SHORT") or \
+                (trend == "DOWNTREND" and trade_direction == "LONG"):
+            if trend_strength == "STRONG_TREND":
+                entry_score *= 0.7  # Reduz score em 30%
+                logger.info(
+                    f"Score penalizado por trade contra tendência forte: {entry_score:.2f} (após redução de 30%)")
+
+        # Decidir se deve entrar
+        should_enter = entry_score >= entry_threshold
+
+        return should_enter, entry_score
