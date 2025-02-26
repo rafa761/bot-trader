@@ -12,7 +12,7 @@ optuna-integration[tfkeras]==4.2.1
 pandas==2.2.3
 plotly==6.0.0
 pydantic==2.10.6
-pydantic-settings==2.7.1
+pydantic-settings==2.8.0
 python-binance==1.0.27
 python-dotenv==1.0.1
 requests==2.32.3
