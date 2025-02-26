@@ -3,8 +3,6 @@
 import asyncio
 import threading
 
-from binance import ThreadedWebsocketManager
-
 from core.constants import TRAINED_MODELS_DIR
 from core.logger import logger
 from dashboard.dashboard import create_dashboard
@@ -13,10 +11,10 @@ from models.lstm.schemas import LSTMConfig
 from services.trading_bot import TradingBot
 
 
-def main() -> None:
+async def async_main() -> None:
     """
-    Função principal que inicializa o TradingBot com modelos LSTM pré-treinados,
-    a aplicação Dash, e mantém o fluxo de execução.
+    Função principal assíncrona que inicializa o TradingBot com modelos LSTM pré-treinados
+    e mantém o fluxo de execução.
     """
     logger.info("Iniciando TradingBot..aguarde")
 
@@ -60,16 +58,6 @@ def main() -> None:
     # Inicializa o TradingBot com os modelos carregados
     bot = TradingBot(tp_model=tp_model, sl_model=sl_model)
 
-    # Inicia WebSocket Manager
-    logger.info("Iniciando WebsocketManager...")
-    twm = ThreadedWebsocketManager(
-        api_key=bot.binance_client.client.API_KEY,
-        api_secret=bot.binance_client.client.API_SECRET,
-        testnet=True
-    )
-    twm.start()
-    logger.info("WebsocketManager iniciado com sucesso.")
-
     # Cria o dashboard
     logger.info("Iniciando Dashboard...")
     dashboard_app = create_dashboard(bot.data_handler)
@@ -86,12 +74,23 @@ def main() -> None:
     try:
         logger.info("Bot iniciado")
         # Executa o loop principal do bot
-        asyncio.run(bot.run())
+        await bot.run()
     except KeyboardInterrupt:
         logger.info("Bot interrompido manualmente.")
+    except Exception as e:
+        logger.error(f"Erro durante execução: {e}", exc_info=True)
     finally:
         logger.info("Bot finalizado")
-        twm.stop()
+
+
+def main() -> None:
+    """Função de entrada para execução do bot"""
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        logger.info("Aplicação interrompida pelo usuário")
+    except Exception as e:
+        logger.error(f"Erro fatal: {e}", exc_info=True)
 
 
 if __name__ == "__main__":
