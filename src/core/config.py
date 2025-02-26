@@ -1,3 +1,5 @@
+# core\config.py
+
 from functools import lru_cache
 
 from dotenv import load_dotenv
@@ -23,15 +25,6 @@ class Settings(BaseSettings):
     LEVERAGE: int = Field(5, description="Alavancagem utilizada")
     RISK_PER_TRADE: float = Field(0.20, description="Percentual de risco por trade (ex: 0.01 para 1%)")
 
-    # Novas variáveis para controle do treinamento
-    MODEL_DATA_LOOKBACK: int = Field(30, description="Janela de lookback para sequências LSTM")
-    MODEL_N_TRIALS: int = Field(10, description="Número de trials para otimização com Optuna")
-    MODEL_EPOCHS_OPTUNA: int = Field(20, description="Número de épocas durante a otimização do Optuna")
-    MODEL_EPOCHS_TRAINING: int = Field(50, description="Número de épocas no treinamento final")
-    MODEL_PATIENCE: int = Field(10, description="Paciência para early stopping")
-    MODEL_BATCH_SIZE_DEFAULT: int = Field(64, description="Tamanho padrão do batch")
-    MODEL_SAMPLE_FRACTION: float = Field(0.5, description="Fração dos dados a usar no treinamento (0.0 a 1.0)")
-
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -42,4 +35,4 @@ def get_settings() -> Settings:
     return Settings()
 
 
-config = get_settings()
+settings = get_settings()

@@ -12,7 +12,7 @@ import plotly.graph_objs as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
-from core.config import config
+from core.config import settings
 from core.logger import memory_logger
 from repositories.data_handler import DataHandler
 
@@ -36,7 +36,7 @@ def create_dashboard(data_handler: DataHandler) -> dash.Dash:
 
     app.layout = dbc.Container(fluid=True, children=[
         dbc.Row([
-            dbc.Col(html.H3(f"Bot de Trading {config.SYMBOL} (Futuros Testnet)"), width=12),
+            dbc.Col(html.H3(f"Bot de Trading {settings.SYMBOL} (Futuros Testnet)"), width=12),
         ]),
 
         # 1) Gráfico de Candlestick
@@ -97,10 +97,10 @@ def create_dashboard(data_handler: DataHandler) -> dash.Dash:
             high=df_plot["high"],
             low=df_plot["low"],
             close=df_plot["close"],
-            name=config.SYMBOL
+            name=settings.SYMBOL
         )])
         fig.update_layout(
-            title=f"Histórico de Preços - {config.SYMBOL}",
+            title=f"Histórico de Preços - {settings.SYMBOL}",
             xaxis_rangeslider_visible=False,
             xaxis_title="Data/Hora",
             yaxis_title="Preço"

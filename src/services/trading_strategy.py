@@ -1,9 +1,4 @@
-# trading_strategy.py
-
-"""
-Este módulo define a lógica de entrada/saída (compra/venda), cálculo de quantidade,
-e ajustes de preço baseados em tickSize/stepSize, etc.
-"""
+# services\trading_strategy.py
 
 import math
 

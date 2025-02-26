@@ -1,16 +1,11 @@
-# binance_client.py
-
-"""
-Este módulo encapsula a criação do Client da Binance e métodos de acesso
-relacionados (ordens, preços, posições, etc.).
-"""
+# services\binance_client.py
 
 import time
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from core.config import config
+from core.config import settings
 from core.logger import logger
 
 
@@ -28,8 +23,8 @@ class BinanceClient:
         """
         logger.info("Iniciando client da Binance...")
         self.client = Client(
-            api_key=config.BINANCE_API_KEY_TESTNET,
-            api_secret=config.BINANCE_API_SECRET_TESTNET,
+            api_key=settings.BINANCE_API_KEY_TESTNET,
+            api_secret=settings.BINANCE_API_SECRET_TESTNET,
             testnet=True
         )
         logger.info("Client da Binance iniciado")
