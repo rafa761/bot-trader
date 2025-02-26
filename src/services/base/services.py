@@ -1,7 +1,6 @@
 # services\base\services.py
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Tuple
 
 import pandas as pd
 
