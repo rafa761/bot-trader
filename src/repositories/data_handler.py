@@ -38,6 +38,8 @@ class DataHandler:
         self.historical_df = pd.DataFrame()
         self.data_lock = threading.Lock()
         self.technical_indicator_adder = TechnicalIndicatorAdder()
+        # Número mínimo de candles necessários para calcular indicadores técnicos com segurança
+        self.min_candles_required = 50
 
     async def get_latest_data(self, symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
         """
@@ -81,19 +83,47 @@ class DataHandler:
 
     def update_historical_data(self, new_row: dict) -> None:
         """
-        Atualiza o DataFrame histórico com uma nova linha e recalcula indicadores.
+        Atualiza o DataFrame histórico com uma nova linha e recalcula indicadores
+        de forma segura, garantindo que existam dados suficientes para os cálculos.
 
         :param new_row: Dicionário com colunas [timestamp, open, high, low, close, volume].
         """
         try:
             with self.data_lock:
+                # Se o DataFrame estiver vazio, apenas adiciona o novo registro
+                if self.historical_df.empty:
+                    self.historical_df = pd.DataFrame([new_row])
+                    logger.debug("Primeiro registro adicionado ao DataFrame histórico.")
+                    return
+
+                # Adiciona a nova linha, remove duplicatas e ordena
                 df = self.historical_df
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 df.drop_duplicates(subset="timestamp", keep="last", inplace=True)
                 df.sort_values(by="timestamp", inplace=True)
                 df.reset_index(drop=True, inplace=True)
-                df = self.technical_indicator_adder.add_technical_indicators(df)
+
+                # Só recalcula indicadores se tiver dados suficientes
+                if len(df) >= self.min_candles_required:
+                    try:
+                        df = self.technical_indicator_adder.add_technical_indicators(df)
+                    except Exception as e:
+                        logger.error(f"Erro ao adicionar indicadores técnicos: {e}")
+                        # Mesmo com erro, mantemos os dados brutos
+                        self.historical_df = df
+                        return
+                else:
+                    logger.warning(
+                        f"Dados insuficientes para cálculo de indicadores técnicos. "
+                        f"Necessário: {self.min_candles_required}, Disponível: {len(df)}"
+                    )
+                    # Mantém os dados brutos sem calcular indicadores
+                    self.historical_df = df
+                    return
+
+                # Atualiza o DataFrame histórico
                 self.historical_df = df
+
         except Exception as e:
             logger.error(f"Erro ao atualizar histórico: {e}", exc_info=True)
 
@@ -234,9 +264,39 @@ class TechnicalIndicatorConfig(BaseModel):
 class TechnicalIndicatorAdder:
     @classmethod
     def add_technical_indicators(cls, df: pd.DataFrame, config: TechnicalIndicatorConfig | None = None) -> pd.DataFrame:
-        """Adiciona indicadores técnicos ao DataFrame."""
+        """
+        Adiciona indicadores técnicos ao DataFrame com validação de tamanho mínimo.
+
+        :param df: DataFrame com dados OHLCV
+        :param config: Configuração opcional para indicadores técnicos
+        :return: DataFrame com indicadores técnicos adicionados
+        """
         if config is None:
             config = TechnicalIndicatorConfig()
+
+        # Definir o tamanho mínimo necessário para os indicadores
+        min_size = max(
+            config.sma_windows[1],
+            config.bollinger_window,
+            config.ema_windows[1],
+            config.rsi_window,
+            config.stoch_k_window + config.stoch_d_window,
+            config.cci_window,
+            config.volume_macd_windows[0],
+            config.atr_window,
+            config.keltner_window,
+            config.vwap_window,
+            config.adx_window,
+            config.roc_window
+        )
+
+        # Verificar se há dados suficientes
+        if len(df) < min_size:
+            logger.warning(
+                f"DataFrame com tamanho insuficiente para calcular indicadores. "
+                f"Necessário: {min_size}, Disponível: {len(df)}"
+            )
+            return df
 
         try:
             logger.info("Adicionando indicadores técnicos ao DataFrame.")

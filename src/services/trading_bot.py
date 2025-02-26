@@ -51,19 +51,35 @@ class TradingBot:
         Prepara uma sequência para previsão com modelo LSTM.
 
         :param df: DataFrame com os dados históricos
-        :return: Sequência formatada para o modelo LSTM
+        :return: Sequência formatada para o modelo LSTM ou None se dados insuficientes
         """
+        # Verifica se todos os FEATURE_COLUMNS existem no DataFrame
+        missing_columns = [col for col in FEATURE_COLUMNS if col not in df.columns]
+        if missing_columns:
+            logger.warning(f"Colunas ausentes no DataFrame: {missing_columns}")
+            return None
+
+        # Verifica se há dados suficientes
         if len(df) < self.sequence_length:
             logger.warning(f"Dados insuficientes para LSTM. Necessário: {self.sequence_length}, Disponível: {len(df)}")
             return None
 
-        # Pegar as últimas 'sequence_length' entradas para a previsão
-        last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
+        # Verifica se há valores NaN nas features requeridas
+        if df[FEATURE_COLUMNS].isna().any().any():
+            logger.warning("Existem valores NaN nas features necessárias para o LSTM")
+            return None
 
-        # Reformatar para o formato que o LSTM espera [samples, time steps, features]
-        x_pred = np.array([last_sequence])
+        try:
+            # Pegar as últimas 'sequence_length' entradas para a previsão
+            last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
 
-        return x_pred
+            # Reformatar para o formato que o LSTM espera [samples, time steps, features]
+            x_pred = np.array([last_sequence])
+
+            return x_pred
+        except Exception as e:
+            logger.error(f"Erro ao preparar sequência para LSTM: {e}", exc_info=True)
+            return None
 
     async def initialize_filters(self) -> None:
         """
@@ -101,9 +117,44 @@ class TradingBot:
                 if self.data_handler.historical_df.empty:
                     # Carrega 1000 candles iniciais
                     large_df = await self.data_handler.get_latest_data(settings.SYMBOL, settings.INTERVAL, limit=1000)
-                    with self.data_handler.data_lock:
-                        self.data_handler.historical_df = self.data_handler.technical_indicator_adder.add_technical_indicators(
-                            large_df)
+
+                    if large_df.empty:
+                        logger.error("Não foi possível obter dados históricos iniciais")
+                        await asyncio.sleep(5)
+                        continue
+
+                    # Garantir que temos pelo menos o mínimo de candles necessários para os indicadores
+                    if len(large_df) < 100:  # Valor conservador
+                        logger.warning(
+                            f"Dados históricos insuficientes: obtidos {len(large_df)} candles, necessários pelo menos 100")
+                        await asyncio.sleep(5)
+                        continue
+
+                    try:
+                        with self.data_handler.data_lock:
+                            self.data_handler.historical_df = self.data_handler.technical_indicator_adder.add_technical_indicators(
+                                large_df)
+
+                        # Verificar se todos os indicadores foram calculados corretamente
+                        missing_indicators = [col for col in FEATURE_COLUMNS if
+                                              col not in self.data_handler.historical_df.columns]
+                        if missing_indicators:
+                            logger.error(f"Indicadores ausentes após cálculo: {missing_indicators}")
+                            await asyncio.sleep(5)
+                            continue
+
+                        # Verificar se há valores NaN nos indicadores
+                        if self.data_handler.historical_df[FEATURE_COLUMNS].isna().any().any():
+                            logger.warning("Existem valores NaN nos indicadores técnicos")
+                            # Remove as linhas com NaN para garantir dados limpos
+                            self.data_handler.historical_df.dropna(subset=FEATURE_COLUMNS, inplace=True)
+
+                        logger.info(
+                            f"Dados históricos iniciais carregados com sucesso: {len(self.data_handler.historical_df)} candles")
+                    except Exception as e:
+                        logger.error(f"Erro ao processar dados históricos iniciais: {e}", exc_info=True)
+                        await asyncio.sleep(5)
+                        continue
                 else:
                     # Atualiza candle a candle
                     for i in range(len(new_data)):
@@ -116,6 +167,15 @@ class TradingBot:
                             "close": row["close"],
                             "volume": row["volume"]
                         }
+
+                        # Verifica se já existe este timestamp para evitar duplicatas
+                        if self.data_handler.historical_df is not None and not self.data_handler.historical_df.empty:
+                            existing_timestamps = self.data_handler.historical_df["timestamp"].astype(str).tolist()
+                            if str(row["timestamp"]) in existing_timestamps:
+                                logger.debug(f"Candle com timestamp {row['timestamp']} já existe, ignorando.")
+                                continue
+
+                        # Usa o método original do DataHandler, agora mais seguro
                         self.data_handler.update_historical_data(new_row)
                         logger.debug(f"Atualizado candle: {new_row}")
 
