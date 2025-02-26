@@ -8,7 +8,6 @@ from pathlib import Path
 import arrow
 import numpy as np
 import pandas as pd
-import requests
 import ta
 from binance import Client
 from binance.exceptions import BinanceAPIException
@@ -43,19 +42,22 @@ class DataHandler:
 
     async def get_latest_data(self, symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
         """
-        Coleta as últimas velas de Futuros para um determinado símbolo e intervalo.
+        Coleta as últimas velas de Futuros para um determinado símbolo e intervalo de forma assíncrona.
 
-        :param symbol: Par de trading, ex.: "BTCUSDT"
-        :param interval: Intervalo, ex.: "15m"
-        :param limit: Quantidade de velas a serem obtidas
-        :return: DataFrame com colunas [timestamp, open, high, low, close, volume]
+        Args:
+            symbol: Par de trading, ex.: "BTCUSDT"
+            interval: Intervalo, ex.: "15m"
+            limit: Quantidade de velas a serem obtidas
+
+        Returns:
+            pd.DataFrame: DataFrame com colunas [timestamp, open, high, low, close, volume]
         """
         logger.info(f"Coletando {limit} velas de {symbol} (intervalo={interval})")
         attempt, max_attempts = 0, 5
 
         while attempt < max_attempts:
             try:
-                klines = self.client.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
+                klines = await self.client.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
                 df = pd.DataFrame(klines, columns=[
                     "timestamp", "open", "high", "low", "close", "volume",
                     "close_time", "quote_asset_volume", "number_of_trades",
@@ -67,20 +69,22 @@ class DataHandler:
                 df.dropna(inplace=True)
                 df.reset_index(drop=True, inplace=True)
                 return df[["timestamp", "open", "high", "low", "close", "volume"]]
-            except requests.exceptions.Timeout:
-                logger.warning(f"Timeout ao coletar dados, tentativa {attempt + 1}")
-                await asyncio.sleep(3)
             except BinanceAPIException as e:
                 logger.error(f"Erro API Binance: {e}")
+                # Erros específicos da API Binance geralmente indicam problemas que novas tentativas não resolverão
+                # Exemplos: permissão negada, símbolo inválido, etc.
                 return pd.DataFrame()
+            except TimeoutError:
+                logger.warning(f"Timeout ao coletar dados, tentativa {attempt + 1}")
+                attempt += 1
+                await asyncio.sleep(3)
             except Exception as e:
                 logger.error(f"Erro ao coletar dados: {e}", exc_info=True)
-                return pd.DataFrame()
-            attempt += 1
+                attempt += 1
+                await asyncio.sleep(3)
 
         logger.error("Tentativas esgotadas. Não foi possível coletar dados.")
         return pd.DataFrame()
-
     def update_historical_data(self, new_row: dict) -> None:
         """
         Atualiza o DataFrame histórico com uma nova linha e recalcula indicadores
