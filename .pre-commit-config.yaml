@@ -33,8 +33,3 @@ repos:
     hooks:
       - id: pyupgrade
         args: [ --py312-plus ]
-
-  - repo: https://github.com/radix-ai/auto-smart-commit
-    rev: v1.0.3
-    hooks:
-      - id: auto-smart-commit
