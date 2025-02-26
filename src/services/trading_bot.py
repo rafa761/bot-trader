@@ -3,13 +3,14 @@
 import asyncio
 import sys
 
+import numpy as np
 import pandas as pd
 
 from core.config import settings
-from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
+from core.constants import FEATURE_COLUMNS
 from core.logger import logger
-from models.managers.model_manager import ModelManager
-from repositories.data_handler import DataHandler, LabelCreator
+from models.lstm.model import LSTMModel
+from repositories.data_handler import DataHandler
 from services.binance_client import BinanceClient
 from services.trading_strategy import TradingStrategy
 
@@ -17,31 +18,52 @@ from services.trading_strategy import TradingStrategy
 class TradingBot:
     """
     Classe principal do bot de trading, que faz a orquestração entre
-    DataHandler, ModelManager, TradingStrategy e BinanceClient.
+    DataHandler, modelos LSTM, TradingStrategy e BinanceClient.
     """
 
-    def __init__(self, tp_model_manager: ModelManager, sl_model_manager: ModelManager):
+    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
         """
         Construtor que inicializa as classes auxiliares e configura variáveis necessárias.
 
-        :param tp_model_manager: Gerenciador do modelo para Take Profit
-        :param sl_model_manager: Gerenciador do modelo para Stop Loss
+        :param tp_model: Modelo LSTM pré-treinado para previsão de Take Profit
+        :param sl_model: Modelo LSTM pré-treinado para previsão de Stop Loss
         """
         self.binance_client = BinanceClient()
         self.data_handler = DataHandler(self.binance_client)
-        self.tp_model_manager = tp_model_manager
-        self.sl_model_manager = sl_model_manager
+        self.tp_model = tp_model
+        self.sl_model = sl_model
         self.strategy = TradingStrategy()
 
         # Filtros (tick_size, step_size) para formatar ordens
         self.tick_size, self.step_size = 0.0, 0.0
 
-        # Controle de retreinamento
-        self.models_trained = False
-        self.training_interval = 50
+        # Controle de verificação dos modelos
+        self.models_loaded = tp_model is not None and sl_model is not None
         self.cycle_count = 0
 
-        logger.info("classe TradingBot inicializada com sucesso.")
+        # Parâmetros LSTM
+        self.sequence_length = self.tp_model.config.sequence_length if self.models_loaded else 16
+
+        logger.info("Classe TradingBot inicializada com sucesso.")
+
+    def _prepare_sequence_for_prediction(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Prepara uma sequência para previsão com modelo LSTM.
+
+        :param df: DataFrame com os dados históricos
+        :return: Sequência formatada para o modelo LSTM
+        """
+        if len(df) < self.sequence_length:
+            logger.warning(f"Dados insuficientes para LSTM. Necessário: {self.sequence_length}, Disponível: {len(df)}")
+            return None
+
+        # Pegar as últimas 'sequence_length' entradas para a previsão
+        last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
+
+        # Reformatar para o formato que o LSTM espera [samples, time steps, features]
+        x_pred = np.array([last_sequence])
+
+        return x_pred
 
     async def initialize_filters(self) -> None:
         """
@@ -59,64 +81,10 @@ class TradingBot:
         # Define alavancagem
         self.binance_client.set_leverage(settings.SYMBOL, settings.LEVERAGE)
 
-    async def train_models(self, df_train: pd.DataFrame) -> None:
-        """
-        Treina os modelos de TP e SL com os dados fornecidos.
-
-        :param df_train: DataFrame com features e alvos
-        """
-        logger.info("Treinando modelos TP e SL...")
-
-        # 2. Criação de labels
-        df_train = LabelCreator.create_labels(df_train)
-        if df_train.empty:
-            logger.error("Não foi possível criar labels. Encerrando.")
-            return
-
-        df_train["pct_change_next"] = df_train["close"].pct_change().shift(-1) * 100
-
-        features = df_train[FEATURE_COLUMNS].copy()
-        features.dropna(inplace=True)
-        target_tp = df_train["pct_change_next"].copy()
-        target_sl = df_train["pct_change_next"].copy()
-
-        min_len = min(len(features), len(target_tp))
-        features = features.iloc[:min_len]
-        target_tp = target_tp.iloc[:min_len]
-        target_sl = target_sl.iloc[:min_len]
-
-        # Remove última linha pois shift(-1) gera NaN no final
-        target_tp = target_tp.iloc[:-1]
-        target_sl = target_sl.iloc[:-1]
-
-        target_tp = df_train["pct_change_next"]  # Pode ser ajustado conforme sua lógica
-        target_sl = df_train["pct_change_next"]  # Pode ser ajustado conforme sua lógica
-
-        # Treinamento do modelo TP
-        tp_metrics = self.tp_model_manager.execute_full_pipeline(
-            data=df_train,
-            feature_columns=FEATURE_COLUMNS,
-            target_column="pct_change_next",
-            save_path=TRAINED_MODELS_DIR,
-        )
-        logger.info(f"Modelo TP treinado com métricas: {tp_metrics}")
-
-        # Treinamento do modelo SL
-        sl_metrics = self.sl_model_manager.execute_full_pipeline(
-            data=df_train,
-            feature_columns=FEATURE_COLUMNS,
-            target_column="pct_change_next",
-            save_path=TRAINED_MODELS_DIR,
-        )
-        logger.info(f"Modelo SL treinado com métricas: {sl_metrics}")
-
-        self.models_trained = True
-
     async def run(self) -> None:
         """
         Método principal de execução do bot, contendo o loop assíncrono de:
           - Atualização de dados
-          - Retreinamento online
           - Verificação de posição aberta
           - Colocação de novas ordens
         """
@@ -151,23 +119,15 @@ class TradingBot:
                         self.data_handler.update_historical_data(new_row)
                         logger.debug(f"Atualizado candle: {new_row}")
 
-            # Passo 2: Retreinamento periódico
-            if self.models_trained and (self.cycle_count % self.training_interval) == 0:
-                df_train = self.data_handler.historical_df.copy()
-                if len(df_train) >= 300:
-                    await self.train_models(df_train)
-                else:
-                    logger.info("Ainda não há dados suficientes para treinar.")
-
-            # Passo 3: Verificar se há posição aberta
+            # Passo 2: Verificar se há posição aberta
             open_long = self.binance_client.get_open_position_by_side(settings.SYMBOL, "LONG")
             open_short = self.binance_client.get_open_position_by_side(settings.SYMBOL, "SHORT")
 
             if open_long is not None or open_short is not None:
                 logger.info("Já existe posição aberta. Aguardando fechamento para abrir novo trade.")
             else:
-                # Passo 4: Caso não haja posição, checar sinal do modelo
-                if self.models_trained and not self.data_handler.historical_df.empty:
+                # Passo 3: Caso não haja posição, checar sinal do modelo
+                if self.models_loaded and not self.data_handler.historical_df.empty:
                     current_price = self.binance_client.get_futures_last_price(settings.SYMBOL)
                     if current_price <= 0:
                         logger.warning("Falha ao obter last price. Nenhum trade.")
@@ -175,38 +135,29 @@ class TradingBot:
                         continue
 
                     df_eval = self.data_handler.historical_df.copy()
-                    last_row = df_eval.iloc[-1]
-                    X_eval = pd.DataFrame(
-                        [[
-                            last_row["sma_short"],
-                            last_row["sma_long"],
-                            last_row["ema_short"],
-                            last_row["ema_long"],
-                            last_row["parabolic_sar"],
-                            last_row["rsi"],
-                            last_row["stoch_k"],
-                            last_row["stoch_d"],
-                            last_row["cci"],
-                            last_row["macd"],
-                            last_row["volume_macd"],
-                            last_row["atr"],
-                            last_row["boll_hband"],
-                            last_row["boll_lband"],
-                            last_row["boll_width"],
-                            last_row["keltner_hband"],
-                            last_row["keltner_lband"],
-                            last_row["obv"],
-                            last_row["vwap"],
-                            last_row["adx"],
-                            last_row["roc"],
-                        ]],
-                        columns=FEATURE_COLUMNS,
-                    )
 
-                    # Previsões separadas para TP e SL
-                    predicted_tp_pct = self.tp_model_manager.model.predict(X_eval)[0]
-                    predicted_sl_pct = self.sl_model_manager.model.predict(X_eval)[0]
-                    logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
+                    # Verificar se temos dados suficientes
+                    if len(df_eval) < self.sequence_length:
+                        logger.warning(f"Dados insuficientes para previsão com LSTM. Aguardando mais dados...")
+                        await asyncio.sleep(5)
+                        continue
+
+                    # Preparar sequência para LSTM
+                    X_seq = self._prepare_sequence_for_prediction(df_eval)
+                    if X_seq is None:
+                        logger.warning("Falha ao preparar dados para LSTM. Aguardando próximo ciclo.")
+                        await asyncio.sleep(5)
+                        continue
+
+                    try:
+                        # Previsões com LSTM
+                        predicted_tp_pct = self.tp_model.predict(X_seq)[0][0]
+                        predicted_sl_pct = self.sl_model.predict(X_seq)[0][0]
+                        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
+                    except Exception as e:
+                        logger.error(f"Erro na previsão com LSTM: {e}", exc_info=True)
+                        await asyncio.sleep(5)
+                        continue
 
                     direction = self.strategy.decide_direction(predicted_tp_pct, threshold=0.2)
                     if direction is None:
@@ -243,14 +194,14 @@ class TradingBot:
                             continue
 
                         logger.info(
-                            f"Sinal gerado: "
+                            f"Sinal gerado (LSTM): "
                             f"side={side}, "
                             f"position_side={position_side}, "
-                            f"predicted_tp={tp_factor}, "
-                            f"predicted_sl={sl_factor}, "
-                            f"tp_price={tp_price}, "
-                            f"sl_price={sl_price}, "
-                            f"current_price={current_price}, "
+                            f"predicted_tp={predicted_tp_pct:.2f}%, "
+                            f"predicted_sl={predicted_sl_pct:.2f}%, "
+                            f"tp_price={tp_price:.2f}, "
+                            f"sl_price={sl_price:.2f}, "
+                            f"current_price={current_price:.2f}, "
                             f"leverage={settings.LEVERAGE}, "
                             f"risk_per_trade={settings.RISK_PER_TRADE}"
                         )
