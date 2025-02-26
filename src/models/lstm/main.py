@@ -82,7 +82,7 @@ def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: s
         )
 
 
-def setup_model_and_trainer(target_column='take_profit_pct'):
+def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
     """
     Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizados para CPU.
 
@@ -108,14 +108,15 @@ def setup_model_and_trainer(target_column='take_profit_pct'):
     )
 
     training_config = LSTMTrainingConfig(
-        validation_split=0.15,  # OTIMIZAÇÃO: Reduzido para treinamento mais rápido
-        early_stopping_patience=5,  # OTIMIZAÇÃO: Interrompe treinamento mais cedo
-        reduce_lr_patience=3,  # OTIMIZAÇÃO: Reduz learning rate mais cedo
-        reduce_lr_factor=0.5,  # Mantido em 0.5
-        # Parâmetros padrão
+        validation_split=0.15,
+        early_stopping_patience=10,
+        reduce_lr_patience=3,
+        reduce_lr_factor=0.5,
+        use_early_stopping=True,
+        min_delta=0.001,
         test_size=0.2,
         random_state=42,
-        shuffle=False  # Importante para séries temporais
+        shuffle=False
     )
 
     # Criar modelo e trainer

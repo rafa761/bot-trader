@@ -30,7 +30,8 @@ class TradingSignal(BaseModel):
     tp_factor: float = Field(..., gt=0, description="Fator multiplicador para take profit")
     sl_factor: float = Field(..., gt=0, description="Fator multiplicador para stop loss")
     atr_value: float | None = Field(None, description="Valor atual do ATR, se disponível")
-
+    entry_score: float | None = Field(None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
+    rr_ratio: float | None = Field(None, gt=0, description="Razão risco/recompensa calculada")
 
 class OrderResult(BaseModel):
     """Resultado da execução de uma ordem."""

@@ -459,29 +459,75 @@ class LabelConfig(BaseModel):
 class LabelCreator:
     @classmethod
     def create_labels(cls, df: pd.DataFrame) -> pd.DataFrame:
-        """Cria labels para TP e SL com base no movimento de preço futuro."""
+        """
+        Cria labels para TP e SL com base no movimento de preço futuro,
+        com ajustes para garantir melhor razão risk/reward.
+        """
         try:
             logger.info(f"Criando labels para TP e SL com horizon={settings.MODEL_DATA_PREDICTION_HORIZON} períodos.")
 
+            # 1. Calcular futuros máximos e mínimos
             df['future_high'] = df['high'].rolling(
                 window=settings.MODEL_DATA_PREDICTION_HORIZON
             ).max().shift(-settings.MODEL_DATA_PREDICTION_HORIZON)
+
             df['future_low'] = df['low'].rolling(
                 window=settings.MODEL_DATA_PREDICTION_HORIZON
             ).min().shift(-settings.MODEL_DATA_PREDICTION_HORIZON)
 
-            df['take_profit_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
-            df['stop_loss_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
+            # 2. Calcular ATR para uso no ajuste dinâmico de SL
+            atr = ta.volatility.AverageTrueRange(
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                window=14
+            ).average_true_range()
 
-            # Adicionar features de relação entre take profit e stop loss (razão risco/recompensa)
+            # 3. Calcular take profit e stop loss percentuais básicos
+            df['raw_tp_pct'] = ((df['future_high'] - df['close']) / df['close']) * 100
+            df['raw_sl_pct'] = ((df['close'] - df['future_low']) / df['close']) * 100
+
+            # 4. Calcular stop loss dinâmico baseado em ATR (mais realista)
+            df['atr_sl_pct'] = (atr / df['close']) * 100 * 1.5  # 1.5x ATR para SL
+
+            # 5. Usar o menor entre o SL baseado em preço futuro e o SL baseado em ATR
+            df['stop_loss_pct'] = df[['raw_sl_pct', 'atr_sl_pct']].min(axis=1)
+
+            # 6. Ajustar o take profit para garantir razão R:R mínima de 1.5:1
+            min_rr_ratio = 1.5
+            df['take_profit_pct'] = np.maximum(
+                df['raw_tp_pct'],  # TP original
+                df['stop_loss_pct'] * min_rr_ratio  # TP mínimo para garantir razão R:R
+            )
+
+            # 7. Adicionar features de relação entre take profit e stop loss
             df['tp_sl_ratio'] = df['take_profit_pct'] / df['stop_loss_pct']
+
+            # 8. Adicionar sinalizador de qualidade de trade
+            df['trade_quality'] = ((df['tp_sl_ratio'] > min_rr_ratio) &
+                                   (df['take_profit_pct'] > 0.5) &  # Mínimo de 0.5% de movimento
+                                   (df['stop_loss_pct'] < 2.0)).astype(float)  # Máximo de 2% de risco
+
+            # Limpar valores infinitos e NaN
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-            df.drop(['future_high', 'future_low'], axis=1, inplace=True)
+            # Remover colunas temporárias
+            df.drop(['future_high', 'future_low', 'raw_tp_pct', 'raw_sl_pct', 'atr_sl_pct'],
+                    axis=1, inplace=True)
 
+            # Remover linhas com valores NaN
             df.dropna(inplace=True)
 
-            logger.info("Labels para TP e SL criados com sucesso.")
+            logger.info("Labels para TP e SL criados com sucesso com razão R:R aprimorada.")
+
+            # Verificar estatísticas da razão R:R
+            avg_ratio = df['tp_sl_ratio'].mean()
+            median_ratio = df['tp_sl_ratio'].median()
+            logger.info(f"Razão R:R média: {avg_ratio:.2f}, Mediana: {median_ratio:.2f}")
+
+            # Verificar percentual de trades de qualidade
+            quality_pct = df['trade_quality'].mean() * 100
+            logger.info(f"Percentual de trades com boa qualidade: {quality_pct:.2f}%")
 
             return df
         except Exception as e:

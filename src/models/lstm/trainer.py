@@ -82,17 +82,27 @@ class LSTMTrainer(BaseTrainer):
         try:
             # Preparar callbacks
             callbacks = [
-                EarlyStopping(
-                    monitor='val_loss',
-                    patience=self.config.early_stopping_patience,
-                    restore_best_weights=True
-                ),
+                # Apenas adiciona ReduceLROnPlateau por padrão
                 ReduceLROnPlateau(
                     monitor='val_loss',
                     factor=self.config.reduce_lr_factor,
-                    patience=self.config.reduce_lr_patience
+                    patience=self.config.reduce_lr_patience,
+                    verbose=1  # Adicionando verbose para melhor feedback
                 )
             ]
+
+            # Adicionar EarlyStopping apenas se configurado para usar
+            if self.config.use_early_stopping:
+                callbacks.append(
+                    EarlyStopping(
+                        monitor='val_loss',
+                        patience=self.config.early_stopping_patience,
+                        restore_best_weights=True,
+                        min_delta=self.config.min_delta,
+                        mode='min',
+                        verbose=1  # Adicionando verbose para melhor feedback
+                    )
+                )
 
             # Adicionar checkpoint se diretório for fornecido
             if checkpoint_dir:
@@ -102,7 +112,8 @@ class LSTMTrainer(BaseTrainer):
                     ModelCheckpoint(
                         filepath=str(checkpoint_path),
                         save_best_only=True,
-                        monitor='val_loss'
+                        monitor='val_loss',
+                        verbose=1  # Adicionando verbose para melhor feedback
                     )
                 )
 

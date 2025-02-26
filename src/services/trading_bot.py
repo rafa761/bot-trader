@@ -1,6 +1,7 @@
 # services/trading_bot.py
 
 import asyncio
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -136,7 +137,7 @@ class LSTMSignalGenerator(SignalGenerator):
             tp_model: LSTMModel,
             sl_model: LSTMModel,
             strategy: TradingStrategy,
-            sequence_length: int = 16
+            sequence_length: int = 24
     ):
         self.tp_model = tp_model
         self.sl_model = sl_model
@@ -144,12 +145,32 @@ class LSTMSignalGenerator(SignalGenerator):
         self.sequence_length = sequence_length
 
     def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """Prepara uma sequência para previsão com modelo LSTM."""
+        """
+        Prepara uma sequência para previsão com modelo LSTM, ajustando o tamanho
+        conforme necessário para compatibilidade com o modelo.
+
+        Args:
+            df: DataFrame com dados históricos incluindo indicadores técnicos
+
+        Returns:
+            np.ndarray: Sequência formatada para o modelo LSTM ou None se houver erro
+        """
+        from core.constants import FEATURE_COLUMNS
+
         # Verifica se todos os FEATURE_COLUMNS existem no DataFrame
         missing_columns = [col for col in FEATURE_COLUMNS if col not in df.columns]
         if missing_columns:
             logger.warning(f"Colunas ausentes no DataFrame: {missing_columns}")
             return None
+
+        # Obtém o tamanho de sequência esperado pelo modelo
+        expected_sequence_length = self.tp_model.model.input_shape[1]
+        if expected_sequence_length != self.sequence_length:
+            logger.warning(
+                f"Ajustando sequence_length: configurado={self.sequence_length}, "
+                f"esperado pelo modelo={expected_sequence_length}"
+            )
+            self.sequence_length = expected_sequence_length
 
         # Verifica se há dados suficientes
         if len(df) < self.sequence_length:
@@ -168,8 +189,19 @@ class LSTMSignalGenerator(SignalGenerator):
             # Pegar as últimas 'sequence_length' entradas para a previsão
             last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
 
+            # Verificar valores anormais
+            if np.isnan(last_sequence).any():
+                logger.warning("Valores NaN detectados na sequência!")
+                last_sequence = np.nan_to_num(last_sequence, nan=0.0)
+
             # Reformatar para o formato que o LSTM espera [samples, time steps, features]
             x_pred = np.array([last_sequence])
+
+            # Verificar se o formato é compatível com o esperado pelo modelo
+            expected_shape = (None, expected_sequence_length, len(FEATURE_COLUMNS))
+            actual_shape = (x_pred.shape[0], x_pred.shape[1], x_pred.shape[2])
+
+            logger.info(f"Shape da sequência preparada: {actual_shape}, esperado pelo modelo: {expected_shape}")
 
             return x_pred
         except Exception as e:
@@ -186,23 +218,59 @@ class LSTMSignalGenerator(SignalGenerator):
             # Previsões com LSTM
             predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
             predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
+
+            # Garantir valores positivos para SL
+            predicted_sl_pct = abs(predicted_sl_pct)
+
             logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
 
-            # Decidir direção baseada nas previsões LSTM
-            direction = self.strategy.decide_direction(predicted_tp_pct, threshold=0.2)
+            # Validar previsões - evitar valores absurdos ou muito pequenos
+            if abs(predicted_tp_pct) > 20:
+                logger.warning(f"TP previsto muito alto: {predicted_tp_pct:.2f}%. Limitando a 20%")
+                predicted_tp_pct = 20.0 if predicted_tp_pct > 0 else -20.0
+
+            if predicted_sl_pct > 10:
+                logger.warning(f"SL previsto muito alto: {predicted_sl_pct:.2f}%. Limitando a 10%")
+                predicted_sl_pct = 10.0
+
+            # Ajustar SL dinamicamente se for muito pequeno (< 0.5%)
+            if predicted_sl_pct < 0.5:
+                atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+                if atr_value:
+                    dynamic_sl = self.strategy.risk_reward_manager.calculate_dynamic_sl(current_price, atr_value)
+                    logger.info(f"Ajustando SL: {predicted_sl_pct:.2f}% -> {dynamic_sl:.2f}% (baseado em ATR)")
+                    predicted_sl_pct = dynamic_sl
+                else:
+                    # Mínimo de 0.5% se não tiver ATR
+                    predicted_sl_pct = 0.5
+
+            # Calcular e exibir a razão R:R atual
+            rr_ratio = abs(predicted_tp_pct / predicted_sl_pct) if predicted_sl_pct > 0 else 0
+            logger.info(f"Razão R:R calculada: {rr_ratio:.2f}")
+
+            # Decidir direção baseada nas previsões LSTM (agora considera R:R)
+            direction = self.strategy.decide_direction(predicted_tp_pct, predicted_sl_pct, threshold=0.2)
             if direction is None:
-                logger.info("Sinal neutro, não abrir trade.")
+                logger.info("Sinal neutro ou R:R insuficiente, não abrir trade.")
                 return None
+
+            # Ajustar TP para garantir razão R:R mínima, se necessário
+            if abs(predicted_tp_pct) < abs(predicted_sl_pct * self.strategy.risk_reward_manager.min_rr_ratio):
+                adjusted_tp_pct = predicted_sl_pct * self.strategy.risk_reward_manager.min_rr_ratio
+                if direction == "SHORT":
+                    adjusted_tp_pct = -adjusted_tp_pct
+                logger.info(f"Ajustando TP para garantir R:R mínimo: {predicted_tp_pct:.2f}% -> {adjusted_tp_pct:.2f}%")
+                predicted_tp_pct = adjusted_tp_pct
 
             # Mapear direção para parâmetros de ordem
             if direction == "LONG":
-                side = "BUY"
-                position_side = "LONG"
+                side: Literal["BUY", "SELL"] = "BUY"
+                position_side: Literal["LONG", "SHORT"] = "LONG"
                 tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
                 sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
             else:  # SHORT
-                side = "SELL"
-                position_side = "SHORT"
+                side: Literal["BUY", "SELL"] = "SELL"
+                position_side: Literal["LONG", "SHORT"] = "SHORT"
                 tp_factor = 1 - max(abs(predicted_tp_pct) / 100, 0.02)
                 sl_factor = 1 + max(abs(predicted_sl_pct) / 100, 0.005)
 
@@ -210,7 +278,29 @@ class LSTMSignalGenerator(SignalGenerator):
             tp_price = current_price * tp_factor
             sl_price = current_price * sl_factor
 
-            # Criar sinal usando o schema Pydantic
+            # Verificar se TP e SL estão muito próximos do preço atual (evitar trades sem sentido)
+            min_price_move = current_price * 0.002  # Mínimo de 0.2% de movimento
+
+            if abs(tp_price - current_price) < min_price_move:
+                logger.warning(f"TP muito próximo do preço atual. TP: {tp_price}, Atual: {current_price}")
+                return None
+
+            if abs(sl_price - current_price) < min_price_move:
+                logger.warning(f"SL muito próximo do preço atual. SL: {sl_price}, Atual: {current_price}")
+                return None
+
+            # Avaliar a qualidade da entrada
+            should_enter, entry_score = self.strategy.evaluate_entry_quality(
+                df, current_price, direction, predicted_tp_pct, predicted_sl_pct
+            )
+
+            if not should_enter:
+                logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
+                return None
+
+            # Obter ATR para ajustes de quantidade
+            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+
             signal = TradingSignal(
                 direction=direction,
                 side=side,
@@ -221,15 +311,16 @@ class LSTMSignalGenerator(SignalGenerator):
                 sl_price=sl_price,
                 current_price=current_price,
                 tp_factor=tp_factor,
-                sl_factor=sl_factor
+                sl_factor=sl_factor,
+                atr_value=atr_value,
+                entry_score=entry_score,
+                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct)
             )
 
             return signal
-
         except Exception as e:
             logger.error(f"Erro na geração de sinal LSTM: {e}", exc_info=True)
             return None
-
 
 class BinanceOrderExecutor(OrderExecutor):
     """Executor de ordens na Binance."""
@@ -617,11 +708,13 @@ class TradingBot:
                     pattern_result.pattern, pattern_result.confidence, signal.direction
                 )
 
-                # 7. Avaliar qualidade da entrada
+                # 7. Avaliar qualidade da entrada considerando parâmetros do sinal já gerado
                 should_enter, entry_score = self.strategy.evaluate_entry_quality(
                     df,
                     signal.current_price,
                     signal.direction,
+                    predicted_tp_pct=signal.predicted_tp_pct,
+                    predicted_sl_pct=signal.predicted_sl_pct,
                     entry_threshold=params.entry_threshold
                 )
 
@@ -643,6 +736,21 @@ class TradingBot:
                 signal.sl_factor *= params.sl_adjustment_factor
                 signal.tp_price = signal.current_price * signal.tp_factor
                 signal.sl_price = signal.current_price * signal.sl_factor
+
+                # Atualizar a razão R:R após ajustes
+                new_tp_pct = (signal.tp_price / signal.current_price - 1) * 100
+                new_sl_pct = (1 - signal.sl_price / signal.current_price) * 100 if signal.direction == "LONG" else \
+                    (signal.sl_price / signal.current_price - 1) * 100
+
+                # Atualizar signal com novos valores percentuais
+                signal.predicted_tp_pct = new_tp_pct if signal.direction == "LONG" else -new_tp_pct
+                signal.predicted_sl_pct = abs(new_sl_pct)
+                signal.rr_ratio = abs(signal.predicted_tp_pct / signal.predicted_sl_pct)
+
+                logger.info(
+                    f"Parâmetros ajustados: TP={signal.predicted_tp_pct:.2f}%, "
+                    f"SL={signal.predicted_sl_pct:.2f}%, R:R={signal.rr_ratio:.2f}"
+                )
 
                 # Adicionar ATR para cálculo de tamanho da posição, se disponível
                 if 'atr' in df.columns:
