@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from core.config import settings
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from repositories.data_handler import DataHandler
@@ -62,8 +62,6 @@ class TradingBot:
         Returns:
             MarketPatternClassifier ou None: Instância do classificador ou None se não for possível carregar
         """
-        from core.constants import TRAINED_MODELS_DIR
-
         pattern_classifier_path = TRAINED_MODELS_DIR / "market_pattern_classifier.keras"
 
         if pattern_classifier_path.exists():
