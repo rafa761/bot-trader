@@ -676,7 +676,7 @@ class PatternBasedParameterAdjuster(ParameterAdjuster):
         """Ajusta os parâmetros de trading baseado no padrão de mercado."""
         # Valores padrão
         params = TradingParameters(
-            entry_threshold=0.6,
+            entry_threshold=settings.ENTRY_THRESHOLD_DEFAULT,
             tp_adjustment_factor=1.0,
             sl_adjustment_factor=1.0
         )
@@ -687,20 +687,20 @@ class PatternBasedParameterAdjuster(ParameterAdjuster):
 
         if pattern == "RANGE":
             # Em mercado lateralizado, ser mais conservador
-            params.entry_threshold = 0.8  # Exigir score de entrada mais alto
+            params.entry_threshold = settings.ENTRY_THRESHOLD_RANGE
             # Ajustar TP/SL para valores menores
-            params.tp_adjustment_factor = 0.7
-            params.sl_adjustment_factor = 0.7
+            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_RANGE
+            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_RANGE
             logger.info(
                 "Ajustando estratégia para mercado em RANGE: trades mais seletivos, targets menores"
             )
 
         elif pattern == "VOLATILE":
             # Em mercado volátil, ser muito seletivo
-            params.entry_threshold = 0.9  # Ser extremamente seletivo
+            params.entry_threshold = settings.ENTRY_THRESHOLD_VOLATILE
             # Ampliar stops para evitar stop-outs
-            params.tp_adjustment_factor = 1.2
-            params.sl_adjustment_factor = 1.5
+            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_VOLATILE
+            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_VOLATILE
             logger.info(
                 "Ajustando estratégia para mercado VOLÁTIL: muito seletivo, stops mais amplos"
             )
@@ -710,19 +710,18 @@ class PatternBasedParameterAdjuster(ParameterAdjuster):
             if (direction == "LONG" and pattern == "UPTREND") or \
                     (direction == "SHORT" and pattern == "DOWNTREND"):
                 # Trade a favor da tendência - ser mais agressivo
-                params.entry_threshold = 0.65
+                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
                 logger.info(
                     f"Trade {direction} alinhado com tendência {pattern}: menos seletivo"
                 )
             else:
                 # Trade contra a tendência - ser mais cauteloso
-                params.entry_threshold = 0.85
+                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
                 logger.info(
                     f"Trade {direction} contra tendência {pattern}: mais seletivo"
                 )
 
         return params
-
 
 # Classe principal refatorada
 class TradingBot:

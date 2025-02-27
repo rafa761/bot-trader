@@ -1,5 +1,5 @@
-# services/risk_reward_manager.py - Nova classe
-
+# services/risk_reward_manager.py
+from core.config import settings
 from core.logger import logger
 
 
@@ -9,17 +9,20 @@ class RiskRewardManager:
     Implementa estratégias avançadas para otimizar a razão entre recompensa e risco.
     """
 
-    def __init__(self, min_rr_ratio: float = 1.5, atr_multiplier: float = 1.5):
+    def __init__(self, min_rr_ratio: float = None, atr_multiplier: float = None):
         """
         Inicializa o gerenciador de risk/reward.
 
         Args:
-            min_rr_ratio: Razão mínima aceitável entre recompensa e risco (padrão: 1.5)
-            atr_multiplier: Multiplicador do ATR para definição de stop loss (padrão: 1.5)
+            min_rr_ratio: Razão mínima aceitável entre recompensa e risco
+            atr_multiplier: Multiplicador do ATR para definição de stop loss
         """
-        self.min_rr_ratio = min_rr_ratio
-        self.atr_multiplier = atr_multiplier
-        logger.info(f"RiskRewardManager inicializado (min_rr_ratio={min_rr_ratio}, atr_multiplier={atr_multiplier})")
+        self.min_rr_ratio = min_rr_ratio if min_rr_ratio is not None else settings.MIN_RR_RATIO
+        self.atr_multiplier = atr_multiplier if atr_multiplier is not None else settings.ATR_MULTIPLIER
+
+        logger.info(
+            f"RiskRewardManager inicializado (min_rr_ratio={self.min_rr_ratio}, atr_multiplier={self.atr_multiplier})")
+
 
     def calculate_dynamic_sl(self, current_price: float, atr_value: float) -> float:
         """

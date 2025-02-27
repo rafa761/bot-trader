@@ -2,6 +2,7 @@
 
 import math
 
+from core.config import settings
 from core.logger import logger
 from services.risk_reward_manager import RiskRewardManager
 
@@ -83,7 +84,7 @@ class TradingStrategy:
         if atr_value is not None:
             atr_percentage = atr_value / current_price * 100
 
-            if atr_percentage > 1.5:  # Alta volatilidade
+            if atr_percentage > settings.VOLATILITY_HIGH_THRESHOLD:  # Alta volatilidade
                 volatility_factor = 0.7
                 risk_amount *= volatility_factor
                 logger.info(
@@ -91,7 +92,7 @@ class TradingStrategy:
                     f"Reduzindo risco de {original_risk:.2f} para {risk_amount:.2f} "
                     f"({volatility_factor * 100:.0f}% do normal)"
                 )
-            elif atr_percentage < 0.5:  # Baixa volatilidade
+            elif atr_percentage < settings.VOLATILITY_LOW_THRESHOLD:  # Baixa volatilidade
                 volatility_factor = 1.3
                 risk_amount *= volatility_factor
                 logger.info(
@@ -102,7 +103,18 @@ class TradingStrategy:
             else:
                 logger.info(f"ATR normal ({atr_percentage:.2f}%) - Mantendo risco padrão")
 
-        quantity = (risk_amount / current_price) * leverage
+        # Calcular quantidade básica
+        base_quantity = (risk_amount / current_price) * leverage
+
+        # Verificar se excede o tamanho máximo permitido
+        max_quantity = (capital * settings.MAX_POSITION_SIZE_PCT) / current_price * leverage
+
+        # Usar o menor valor entre a quantidade calculada e o máximo permitido
+        quantity = min(base_quantity, max_quantity)
+
+        if quantity < base_quantity:
+            logger.info(f"Quantidade ajustada para limite máximo: {quantity:.4f} (era {base_quantity:.4f})")
+
         return quantity
 
     def adjust_price_to_tick_size(self, price: float, tick_size: float) -> float:
@@ -146,7 +158,7 @@ class TradingStrategy:
             trade_direction: str,
             predicted_tp_pct: float = None,
             predicted_sl_pct: float = None,
-            entry_threshold: float = 0.7
+            entry_threshold: float = settings.ENTRY_THRESHOLD_DEFAULT
     ) -> tuple[bool, float]:
         """
         Avalia a qualidade da entrada potencial usando múltiplos critérios.
