@@ -1,5 +1,6 @@
 # services/trading_bot.py
 import asyncio
+import datetime
 from typing import Literal
 
 import numpy as np
@@ -26,6 +27,7 @@ from services.base.services import (
     ParameterAdjuster
 )
 from services.binance_client import BinanceClient
+from services.model_retrainer import ModelRetrainer
 from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import TrendAnalyzer
 
@@ -150,6 +152,100 @@ class LSTMSignalGenerator(SignalGenerator):
         # Flag para rastrear se o preprocessador já foi ajustado
         self.preprocessor_fitted = False
 
+        # Registro de previsões para análise de desempenho
+        self.prediction_history: list[tuple[float, float, float, str, datetime.datetime]] = []
+
+        # Timestamp da última atualização de modelo
+        self.last_model_update = datetime.datetime.now()
+
+        logger.info(
+            f"Signal Generator inicializado com modelos TP v{tp_model.config.version} e SL v{sl_model.config.version}")
+
+    def update_models(self, tp_model: LSTMModel, sl_model: LSTMModel) -> bool:
+        """
+        Atualiza as referências dos modelos.
+
+        Args:
+            tp_model: Novo modelo LSTM para previsão de take profit
+            sl_model: Novo modelo LSTM para previsão de stop loss
+
+        Returns:
+            bool: True se os modelos foram atualizados
+        """
+        try:
+            # Verificar se realmente são modelos diferentes
+            if (tp_model.config.version != self.tp_model.config.version or
+                    sl_model.config.version != self.sl_model.config.version):
+                # Atualizar modelos
+                self.tp_model = tp_model
+                self.sl_model = sl_model
+
+                # Resetar preprocessador para garantir compatibilidade
+                self.preprocessor = None
+                self.preprocessor_fitted = False
+
+                self.last_model_update = datetime.datetime.now()
+
+                logger.info(
+                    f"Signal Generator atualizado com novos modelos: "
+                    f"TP v{tp_model.config.version}, SL v{sl_model.config.version}"
+                )
+
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Erro ao atualizar modelos do Signal Generator: {e}", exc_info=True)
+            return False
+
+    def record_actual_values(self, signal_id: str, actual_tp_pct: float, actual_sl_pct: float, retrainer=None):
+        """
+        Registra os valores reais de TP/SL para uma determinada previsão.
+        Esta informação é usada para avaliar a precisão do modelo ao longo do tempo.
+
+        Args:
+            signal_id: Identificador do sinal
+            actual_tp_pct: Valor real do take profit percentual
+            actual_sl_pct: Valor real do stop loss percentual
+            retrainer: Instância opcional do ModelRetrainer para registrar erros
+        """
+        try:
+            # Encontrar a previsão correspondente no histórico
+            for i, (pred_tp, pred_sl, _, signal_id_history, timestamp) in enumerate(self.prediction_history):
+                # Verificar se é o sinal correto
+                if signal_id_history == signal_id:
+                    # Calcular erros
+                    tp_error = 0
+                    sl_error = 0
+
+                    # Registrar apenas erros relevantes (evitar divisão por zero)
+                    if actual_tp_pct > 0 and pred_tp != 0:
+                        tp_error = abs(pred_tp - actual_tp_pct)
+                        logger.info(
+                            f"TP: previsto={pred_tp:.2f}% vs real={actual_tp_pct:.2f}% "
+                            f"(erro={tp_error:.2f}%)"
+                        )
+                        # Registrar no retrainer, especificando que é erro de TP
+                        if retrainer:
+                            retrainer.record_prediction_error(pred_tp, actual_tp_pct, "tp")
+
+                    if actual_sl_pct > 0 and pred_sl != 0:
+                        sl_error = abs(pred_sl - actual_sl_pct)
+                        logger.info(
+                            f"SL: previsto={pred_sl:.2f}% vs real={actual_sl_pct:.2f}% "
+                            f"(erro={sl_error:.2f}%)"
+                        )
+                        # Registrar no retrainer, especificando que é erro de SL
+                        if retrainer:
+                            retrainer.record_prediction_error(pred_sl, actual_sl_pct, "sl")
+
+                    # Remover essa entrada do histórico após processamento
+                    self.prediction_history.pop(i)
+                    logger.info(f"Processado resultado real do sinal {signal_id}")
+                    break
+
+        except Exception as e:
+            logger.error(f"Erro ao registrar valores reais: {e}", exc_info=True)
+
     def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
         """
         Prepara uma sequência para previsão com modelo LSTM, ajustando o tamanho
@@ -214,6 +310,22 @@ class LSTMSignalGenerator(SignalGenerator):
             # Previsões com LSTM
             predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
             predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
+
+            # Gerar ID único para o sinal
+            signal_id = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+            # Guardar previsão no histórico com timestamp atual
+            self.prediction_history.append((
+                predicted_tp_pct,
+                predicted_sl_pct,
+                current_price,
+                signal_id,
+                datetime.datetime.now()
+            ))
+
+            # Limitar tamanho do histórico
+            if len(self.prediction_history) > 100:
+                self.prediction_history.pop(0)
 
             # Garantir valores positivos para SL
             predicted_sl_pct = abs(predicted_sl_pct)
@@ -298,6 +410,7 @@ class LSTMSignalGenerator(SignalGenerator):
             atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
 
             signal = TradingSignal(
+                id=signal_id,
                 direction=direction,
                 side=side,
                 position_side=position_side,
@@ -310,13 +423,15 @@ class LSTMSignalGenerator(SignalGenerator):
                 sl_factor=sl_factor,
                 atr_value=atr_value,
                 entry_score=entry_score,
-                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct)
+                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+                timestamp=datetime.datetime.now()
             )
 
             return signal
         except Exception as e:
             logger.error(f"Erro na geração de sinal LSTM: {e}", exc_info=True)
             return None
+
 
 class BinanceOrderExecutor(OrderExecutor):
     """Executor de ordens na Binance."""
@@ -332,6 +447,10 @@ class BinanceOrderExecutor(OrderExecutor):
         self.strategy = strategy
         self.tick_size = tick_size
         self.step_size = step_size
+
+        # Histórico de ordens executadas
+        self.executed_orders = []
+        self.max_order_history = 100
 
     async def initialize_filters(self) -> None:
         """Inicializa os filtros de trading."""
@@ -444,6 +563,30 @@ class BinanceOrderExecutor(OrderExecutor):
 
             if order_resp:
                 logger.info(f"Ordem de abertura executada: {order_resp}")
+
+                # Obter timestamp atual para comparações futuras
+                current_time = datetime.datetime.now()
+
+                # Adicionar ao histórico de ordens
+                self.executed_orders.append({
+                    "signal_id": signal.id,
+                    "order_id": order_resp.get("orderId", "N/A"),
+                    "direction": signal.direction,
+                    "entry_price": signal.current_price,
+                    "tp_price": signal.tp_price,
+                    "sl_price": signal.sl_price,
+                    "predicted_tp_pct": signal.predicted_tp_pct,
+                    "predicted_sl_pct": signal.predicted_sl_pct,
+                    "timestamp": current_time,
+                    "filled": True,
+                    "processed": False,  # Importante para o processamento posterior
+                    "position_side": signal.position_side  # Adicionar para referência
+                })
+
+                # Limitar tamanho do histórico
+                if len(self.executed_orders) > self.max_order_history:
+                    self.executed_orders.pop(0)
+
                 # Coloca as ordens de TP e SL
                 tp_sl_result = await self.place_tp_sl(
                     signal.direction,
@@ -617,45 +760,413 @@ class TradingBot:
         # Ajustador de parâmetros
         self.parameter_adjuster = PatternBasedParameterAdjuster()
 
+        # Sistema de retreinamento - Com referência para o signal_generator
+        self.model_retrainer = ModelRetrainer(
+            tp_model=tp_model,
+            sl_model=sl_model,
+            get_data_callback=self.get_historical_data_for_retraining,
+            signal_generator_ref=lambda: self.signal_generator,  # Fornece referência atualizada
+            retraining_interval_hours=24,  # Retreinar a cada 24 horas
+            min_data_points=1000,  # Mínimo de 1000 pontos de dados
+            performance_threshold=0.15  # Limiar de erro para retreinamento
+        )
+
+        # Controle de estado interno
+        self.last_retraining_check = datetime.datetime.now()
+        self.retraining_check_interval = 300  # 5 minutos
+
+        # Histórico de trades
+        self.trades_history = []
+        self.max_trades_history = 200
+
         # Controle de ciclos
         self.cycle_count = 0
 
-        # Historico de previsoes
+        # Histórico de previsões
         self.predictions_history = []
+
+        # Flag para verificação de retreinamento
+        self.check_retraining_status_interval = 60  # Verificar a cada 60 ciclos
 
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
-    def _load_pattern_classifier(self):
-        """Carrega o modelo classificador de padrões de mercado."""
-        pattern_classifier_path = TRAINED_MODELS_DIR / "market_pattern_classifier.keras"
+    def get_historical_data_for_retraining(self) -> pd.DataFrame:
+        """
+        Retorna os dados históricos para retreinamento dos modelos.
+        Esta função é usada como callback pelo ModelRetrainer.
 
-        if pattern_classifier_path.exists():
-            try:
-                from models.market_pattern.model import MarketPatternClassifier
-                from models.market_pattern.schemas import MarketPatternConfig
+        Returns:
+            pd.DataFrame: DataFrame com dados históricos
+        """
+        try:
+            df = self.data_handler.historical_df
+            if df is not None and not df.empty:
+                # Criar uma cópia para evitar modificar os dados originais
+                df_copy = df.copy()
+                logger.info(f"Fornecendo {len(df_copy)} registros para retreinamento")
+                return df_copy
+            logger.warning("Sem dados históricos disponíveis para retreinamento")
+            return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Erro ao obter dados históricos para retreinamento: {e}", exc_info=True)
+            return pd.DataFrame()
 
-                pattern_config = MarketPatternConfig(
-                    model_name="market_pattern_classifier",
-                    num_classes=4,
-                    class_names=["UPTREND", "DOWNTREND", "RANGE", "VOLATILE"]
+    async def check_model_updates(self) -> None:
+        """
+        Verifica se os modelos foram atualizados pelo retreinador e sincroniza se necessário.
+        """
+        try:
+            # Verificar se já passou tempo suficiente desde a última verificação
+            current_time = datetime.datetime.now()
+            if (current_time - self.last_retraining_check).total_seconds() < self.retraining_check_interval:
+                return
+
+            self.last_retraining_check = current_time
+
+            # Verificar status do retreinamento
+            retraining_status = self.model_retrainer.get_retraining_status()
+
+            # Se modelos foram atualizados, sincronizar
+            if retraining_status.get("models_updated_flag", False):
+                logger.info("Detectada atualização de modelos - Sincronizando signal_generator")
+
+                # Aguardar um breve momento para garantir que os modelos estejam completamente atualizados
+                await asyncio.sleep(2)
+
+                # Atualizar modelos do signal_generator
+                updated = self.signal_generator.update_models(
+                    tp_model=self.model_retrainer.tp_model,
+                    sl_model=self.model_retrainer.sl_model
                 )
 
-                classifier = MarketPatternClassifier.load(pattern_classifier_path, pattern_config)
-                logger.info("Classificador de padrões de mercado carregado com sucesso")
-                return classifier
+                if updated:
+                    logger.info("Signal Generator sincronizado com os modelos retreinados")
+                    # Limpar flag após sincronização bem-sucedida
+                    self.model_retrainer.models_updated.clear()
 
-            except Exception as e:
-                logger.error(f"Erro ao carregar classificador de padrões: {e}", exc_info=True)
+                    # Log dos novos modelos
+                    logger.info(
+                        f"Modelos atualizados - TP: v{self.model_retrainer.tp_model.config.version}, "
+                        f"SL: v{self.model_retrainer.sl_model.config.version}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Erro ao verificar atualizações de modelo: {e}", exc_info=True)
+
+    async def _check_order_status(self, order_id: str) -> bool:
+        """
+        Verifica na Binance se uma ordem foi fechada.
+
+        Args:
+            order_id: ID da ordem a verificar
+
+        Returns:
+            bool: True se a ordem foi fechada (posição encerrada), False caso contrário
+        """
+        if not order_id or order_id == "N/A":
+            return False
+
+        try:
+            # Verificar posições atuais
+            positions = await self.order_executor.client.client.futures_position_information(
+                symbol=settings.SYMBOL
+            )
+
+            # Verificar o histórico de ordens
+            orders = await self.order_executor.client.client.futures_get_all_orders(
+                symbol=settings.SYMBOL,
+                orderId=order_id
+            )
+
+            # Se não encontrar a ordem no histórico, não foi fechada
+            if not orders:
+                return False
+
+            target_order = next((o for o in orders if str(o.get('orderId')) == str(order_id)), None)
+
+            if not target_order:
+                return False
+
+            # Verificar se esta ordem tem uma posição associada ainda aberta
+            position_exists = False
+            for pos in positions:
+                # Se existe alguma posição aberta com quantidade não zero
+                if abs(float(pos.get('positionAmt', 0))) > 0:
+                    position_exists = True
+                    break
+
+            # Se a ordem está no status 'FILLED' mas não há posição aberta, então foi fechada
+            if target_order.get('status') == 'FILLED' and not position_exists:
+                return True
+
+            # Adicionalmente, verificar se existem ordens TP/SL executadas para este símbolo
+            # que possam indicar que a posição foi fechada
+            recent_orders = await self.order_executor.client.client.futures_get_all_orders(
+                symbol=settings.SYMBOL,
+                limit=10  # Verificar apenas ordens recentes
+            )
+
+            for order in recent_orders:
+                # Verifica se é uma ordem TAKE_PROFIT_MARKET ou STOP_MARKET que foi executada
+                if (order.get('type') in ['TAKE_PROFIT_MARKET', 'STOP_MARKET'] and
+                        order.get('status') == 'FILLED'):
+                    logger.info(f"Encontrada ordem TP/SL executada: {order.get('orderId')}")
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Erro ao verificar status da ordem {order_id}: {e}", exc_info=True)
+            return False
+
+    async def _get_trade_result(self, order: dict) -> dict | None:
+        """
+        Obtém o resultado real de um trade fechado consultando a Binance.
+
+        Args:
+            order: Dicionário com detalhes da ordem
+
+        Returns:
+            dict: Resultado real do trade com informações de TP/SL e preços
+            None: Se não foi possível obter os resultados
+        """
+        try:
+            order_id = order.get("order_id")
+            direction = order.get("direction")
+            entry_price = order.get("entry_price")
+            tp_price = order.get("tp_price")
+            sl_price = order.get("sl_price")
+
+            if not order_id or not entry_price:
                 return None
-        else:
-            logger.warning(f"Classificador de padrões não encontrado em {pattern_classifier_path}")
+
+            # Obter histórico de ordens para identificar a que fechou a posição
+            trades = await self.order_executor.client.client.futures_account_trades(
+                symbol=settings.SYMBOL,
+                limit=50  # Limitar às 50 ordens mais recentes
+            )
+
+            # Filtrar apenas as ordens relacionadas a esta posição
+            position_trades = []
+            for trade in trades:
+                # Verificar se o trade está relacionado a esta ordem (mesma posição ou ordens TP/SL relacionadas)
+                if (trade.get('orderId') == order_id or
+                        trade.get('positionSide') == direction or
+                        (trade.get('time') > order.get('timestamp').timestamp() * 1000)):  # Trades após a abertura
+                    position_trades.append(trade)
+
+            if not position_trades:
+                logger.warning(f"Não foram encontrados trades para a ordem {order_id}")
+                return None
+
+            # Ordenar por timestamp para obter o último trade (que fechou a posição)
+            position_trades.sort(key=lambda x: x.get('time', 0))
+            closing_trade = position_trades[-1]
+
+            # Obter o preço de saída
+            exit_price = float(closing_trade.get('price', 0))
+            if exit_price <= 0:
+                logger.warning(f"Preço de saída inválido: {exit_price}")
+                return None
+
+            # Determinar se foi TP ou SL com base no preço de saída e na direção
+            if direction == "LONG":
+                # Para LONG: se saiu acima do preço de entrada, foi TP, senão foi SL
+                is_tp = exit_price > entry_price
+
+                # Calcular o percentual real
+                if is_tp:
+                    actual_pct = (exit_price / entry_price - 1) * 100
+                    result = {
+                        "result": "TP",
+                        "actual_tp_pct": actual_pct,
+                        "actual_sl_pct": 0,
+                        "exit_price": exit_price
+                    }
+                else:
+                    actual_pct = (1 - exit_price / entry_price) * 100
+                    result = {
+                        "result": "SL",
+                        "actual_tp_pct": 0,
+                        "actual_sl_pct": actual_pct,
+                        "exit_price": exit_price
+                    }
+            else:  # SHORT
+                # Para SHORT: se saiu abaixo do preço de entrada, foi TP, senão foi SL
+                is_tp = exit_price < entry_price
+
+                # Calcular o percentual real
+                if is_tp:
+                    actual_pct = (1 - exit_price / entry_price) * 100
+                    result = {
+                        "result": "TP",
+                        "actual_tp_pct": actual_pct,
+                        "actual_sl_pct": 0,
+                        "exit_price": exit_price
+                    }
+                else:
+                    actual_pct = (exit_price / entry_price - 1) * 100
+                    result = {
+                        "result": "SL",
+                        "actual_tp_pct": 0,
+                        "actual_sl_pct": actual_pct,
+                        "exit_price": exit_price
+                    }
+
+            # Verificação adicional: se a posição saiu por TP ou SL
+            # Comparar com os preços configurados de TP e SL para maior precisão
+            if direction == "LONG":
+                if abs(exit_price - tp_price) < abs(exit_price - sl_price):
+                    result["result"] = "TP"
+                else:
+                    result["result"] = "SL"
+            else:  # SHORT
+                if abs(exit_price - tp_price) < abs(exit_price - sl_price):
+                    result["result"] = "TP"
+                else:
+                    result["result"] = "SL"
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Erro ao obter resultado do trade: {e}", exc_info=True)
             return None
 
     async def initialize(self) -> None:
         """Inicializa todos os componentes do bot."""
         await self.data_provider.initialize()
         await self.order_executor.initialize_filters()
+
+        # Iniciar o sistema de retreinamento
+        self.model_retrainer.start()
+
         logger.info("TradingBot inicializado e pronto para operar.")
+
+    async def process_completed_trades(self):
+        """
+        Processa trades completados para registrar valores reais de TP/SL.
+        Esta função busca informações de trades fechados diretamente da Binance
+        para alimentar o sistema de retreinamento com dados reais.
+        """
+        try:
+            # Obter todas as ordens executadas que não foram processadas ainda
+            for order in self.order_executor.executed_orders:
+                # Pular ordens já processadas
+                if order.get("processed", False):
+                    continue
+
+                # Obter ID do sinal e da ordem
+                signal_id = order.get("signal_id")
+                order_id = order.get("order_id")
+                if not signal_id or not order_id or order_id == "N/A":
+                    continue
+
+                # Verificar se a posição foi fechada na Binance
+                is_closed = await self._check_order_status(order_id)
+
+                if is_closed:
+                    logger.info(f"Trade {signal_id} (ordem {order_id}) foi fechado. Obtendo resultados reais...")
+
+                    # Obter os dados reais do trade
+                    trade_result = await self._get_trade_result(order)
+
+                    if trade_result:
+                        result_type = trade_result["result"]
+
+                        # Registrar os resultados com base no tipo de fechamento (TP ou SL)
+                        if result_type == "TP":
+                            actual_tp_pct = trade_result["actual_tp_pct"]
+                            predicted_tp_pct = order.get("predicted_tp_pct", 0)
+
+                            # Registrar no histórico de trades
+                            self.trades_history.append({
+                                "signal_id": signal_id,
+                                "direction": order.get("direction"),
+                                "result": "TP",
+                                "predicted_tp_pct": predicted_tp_pct,
+                                "actual_tp_pct": actual_tp_pct,
+                                "close_time": datetime.datetime.now(),
+                                "entry_price": order.get("entry_price"),
+                                "exit_price": trade_result.get("exit_price")
+                            })
+
+                            # Registrar dados para o retreinamento
+                            self.signal_generator.record_actual_values(
+                                signal_id, actual_tp_pct, 0, self.model_retrainer
+                            )
+
+                            logger.info(
+                                f"Trade {signal_id} atingiu TP: previsto={predicted_tp_pct:.2f}%, real={actual_tp_pct:.2f}%")
+
+                        elif result_type == "SL":
+                            actual_sl_pct = trade_result["actual_sl_pct"]
+                            predicted_sl_pct = order.get("predicted_sl_pct", 0)
+
+                            # Registrar no histórico de trades
+                            self.trades_history.append({
+                                "signal_id": signal_id,
+                                "direction": order.get("direction"),
+                                "result": "SL",
+                                "predicted_sl_pct": predicted_sl_pct,
+                                "actual_sl_pct": actual_sl_pct,
+                                "close_time": datetime.datetime.now(),
+                                "entry_price": order.get("entry_price"),
+                                "exit_price": trade_result.get("exit_price")
+                            })
+
+                            # Registrar dados para o retreinamento
+                            self.signal_generator.record_actual_values(
+                                signal_id, 0, actual_sl_pct, self.model_retrainer
+                            )
+
+                            logger.info(
+                                f"Trade {signal_id} atingiu SL: previsto={predicted_sl_pct:.2f}%, real={actual_sl_pct:.2f}%")
+
+                        # Marcar ordem como processada para não processá-la novamente
+                        order["processed"] = True
+
+                    else:
+                        logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
+
+            # Limitar tamanho do histórico
+            if len(self.trades_history) > self.max_trades_history:
+                self.trades_history = self.trades_history[-self.max_trades_history:]
+
+        except Exception as e:
+            logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
+
+    def _load_pattern_classifier(self):
+        """Carrega o modelo classificador de padrões de mercado."""
+        try:
+            pattern_classifier_path = TRAINED_MODELS_DIR / "market_pattern_classifier.keras"
+
+            if pattern_classifier_path.exists():
+                try:
+                    from models.market_pattern.model import MarketPatternClassifier
+                    from models.market_pattern.schemas import MarketPatternConfig
+
+                    pattern_config = MarketPatternConfig(
+                        model_name="market_pattern_classifier",
+                        num_classes=4,
+                        class_names=["UPTREND", "DOWNTREND", "RANGE", "VOLATILE"]
+                    )
+
+                    classifier = MarketPatternClassifier.load(pattern_classifier_path, pattern_config)
+                    logger.info("Classificador de padrões de mercado carregado com sucesso")
+                    return classifier
+
+                except Exception as e:
+                    logger.error(f"Erro ao carregar classificador de padrões: {e}", exc_info=True)
+                    return None
+            else:
+                logger.warning(
+                    f"Classificador de padrões não encontrado em {pattern_classifier_path}. "
+                    f"Usando análise de tendência padrão."
+                )
+                return None
+        except Exception as e:
+            logger.warning(f"Erro ao tentar carregar classificador de padrões: {e}")
+            return None
 
     async def run(self) -> None:
         """
@@ -672,6 +1183,17 @@ class TradingBot:
                 # A cada 10 ciclos, mostra um resumo do sistema
                 if self.cycle_count % 10 == 0:
                     await self._log_system_summary()
+
+                # Periodicamente verificar o status do retreinamento
+                if self.cycle_count % self.check_retraining_status_interval == 0:
+                    retraining_status = self.model_retrainer.get_retraining_status()
+                    logger.info(f"Status do retreinamento: {retraining_status}")
+
+                # Verificar atualizações de modelo
+                await self.check_model_updates()
+
+                # Processar trades completados para fornecer dados ao retreinador
+                await self.process_completed_trades()
 
                 # 1. Atualizar dados de mercado
                 df = await self.data_provider.get_latest_data()
@@ -789,6 +1311,21 @@ class TradingBot:
         logger.info(
             f"Classificador de padrões: {'Operacional' if self.pattern_analyzer.pattern_classifier is not None else 'Não disponível'}"
         )
+
+        # Adicionar informações sobre o retreinamento
+        retraining_status = self.model_retrainer.get_retraining_status()
+        logger.info(f"Retreinamento: {'Em andamento' if retraining_status['retraining_in_progress'] else 'Inativo'}")
+        logger.info(f"Último retreinamento: {retraining_status['last_retraining_time']}")
+        logger.info(f"Horas desde último retreinamento: {retraining_status['hours_since_last_retraining']:.1f}")
+        logger.info(f"Versão TP/SL: {retraining_status['tp_model_version']}/{retraining_status['sl_model_version']}")
+
+        # Adicionar métricas de performance
+        if self.trades_history:
+            tp_count = sum(1 for trade in self.trades_history if trade['result'] == 'TP')
+            total_trades = len(self.trades_history)
+            win_rate = tp_count / total_trades * 100 if total_trades > 0 else 0
+            logger.info(f"Win Rate: {win_rate:.1f}% ({tp_count}/{total_trades})")
+
         logger.info("=" * 50)
 
     def _log_technical_analysis(
