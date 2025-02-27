@@ -170,7 +170,7 @@ class DataPreprocessor:
             self,
             df: pd.DataFrame,
             sequence_length: int
-    ) -> np.ndarray:
+    ) -> np.ndarray | None:
         """
         Prepara uma sequência normalizada e sem outliers para previsão pelo modelo LSTM.
 
