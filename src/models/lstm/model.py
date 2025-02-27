@@ -31,9 +31,7 @@ class LSTMModel(BaseModel):
                    lstm_units, etc.
         """
         super().__init__(config)
-        self.config = config  # Garantindo que config seja do tipo LSTMConfig
-        # Aqui, usamos len(FEATURE_COLUMNS) para determinar o número de features
-        # Se você precisar de um número diferente, atualize este valor ou passe-o na configuração
+        self.config = config
         self.n_features = len(FEATURE_COLUMNS)
         logger.info(f"Modelo LSTM inicializado com {self.n_features} features")
         self.model = None
@@ -131,7 +129,6 @@ class LSTMModel(BaseModel):
             raise ValueError("Modelo não foi treinado ainda")
 
         try:
-            # Validação mais robusta do input
             if input_data is None or len(input_data) == 0:
                 raise ValueError("Dados de entrada vazios")
 
@@ -144,7 +141,6 @@ class LSTMModel(BaseModel):
                 logger.warning("Valores NaN detectados nos dados de entrada!")
                 input_data = np.nan_to_num(input_data, nan=0.0)
 
-            # Log para ajudar no debug
             logger.debug(
                 f"Estatísticas do input: min={np.min(input_data)}, max={np.max(input_data)}, mean={np.mean(input_data)}")
 
@@ -165,9 +161,8 @@ class LSTMModel(BaseModel):
                     )
 
             # Usar batch_size=1 para evitar problemas com previsões em lote
-            predictions = self.model.predict(input_data, batch_size=1, verbose=0)
+            predictions = self.model.predict(input_data, batch_size=1, verbose=1)
 
-            # Log das previsões para debug
             logger.debug(f"Previsões geradas: {predictions}")
 
             return predictions
@@ -186,11 +181,10 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o salvamento.
         """
         try:
-            # Garantir que o diretório exista
             path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Salvar o modelo
             self.model.save(path)
+
             logger.info(f"Modelo salvo em {path}")
         except Exception as e:
             logger.error(f"Erro ao salvar modelo: {e}")
@@ -213,7 +207,6 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o carregamento.
         """
         try:
-            # Carregar o modelo
             loaded_model = load_model(path)
             logger.info(f"Modelo carregado de {path}")
 

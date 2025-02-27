@@ -48,7 +48,7 @@ class LSTMTrainer(BaseTrainer):
         """
         # OTIMIZAÇÃO: Usando stride para reduzir o número de sequências e acelerar o treinamento
         # stride = 2 significa que pegamos a cada 2 pontos de dados, reduzindo pela metade o número de sequências
-        stride = 2  # OTIMIZAÇÃO: Ajuste esse valor conforme necessário (1 = todas as sequências, 2 = metade, etc.)
+        stride = 1  # OTIMIZAÇÃO: Ajuste esse valor conforme necessário (1 = todas as sequências, 2 = metade, etc.)
 
         # OTIMIZAÇÃO: Pré-alocação de memória para melhorar performance
         n_samples = (len(X) - sequence_length) // stride
@@ -87,7 +87,7 @@ class LSTMTrainer(BaseTrainer):
                     monitor='val_loss',
                     factor=self.config.reduce_lr_factor,
                     patience=self.config.reduce_lr_patience,
-                    verbose=1  # Adicionando verbose para melhor feedback
+                    verbose=1
                 )
             ]
 
@@ -100,7 +100,7 @@ class LSTMTrainer(BaseTrainer):
                         restore_best_weights=True,
                         min_delta=self.config.min_delta,
                         mode='min',
-                        verbose=1  # Adicionando verbose para melhor feedback
+                        verbose=1
                     )
                 )
 
@@ -113,7 +113,7 @@ class LSTMTrainer(BaseTrainer):
                         filepath=str(checkpoint_path),
                         save_best_only=True,
                         monitor='val_loss',
-                        verbose=1  # Adicionando verbose para melhor feedback
+                        verbose=1
                     )
                 )
 
@@ -184,8 +184,6 @@ class LSTMTrainer(BaseTrainer):
                     )
 
             # Treinar modelo
-            # Nota: Removemos os parâmetros workers e use_multiprocessing que não são compatíveis
-            # com a versão atual do TensorFlow que está sendo usada
             self.history = self.model.model.fit(
                 X_sequences,
                 y_sequences,
@@ -224,7 +222,6 @@ class LSTMTrainer(BaseTrainer):
             X_np = X_test.values
             y_np = y_test.values.reshape(-1, 1)  # Garante que y seja 2D
 
-            # Preparar sequências - agora tratando X e y separadamente
             X_test_seq, y_test_seq = self._prepare_sequences(
                 X_np,
                 y_np,
@@ -247,7 +244,6 @@ class LSTMTrainer(BaseTrainer):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {X_test_seq.shape[2]}"
                     )
 
-            # OTIMIZAÇÃO: Usando batch_size da configuração para avaliação mais eficiente
             evaluation = self.model.model.evaluate(
                 X_test_seq,
                 y_test_seq,

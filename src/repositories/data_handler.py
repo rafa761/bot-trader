@@ -151,13 +151,25 @@ class DataCollector:
         if self.config is None:
             self.config = DataCollectorConfig()
 
-    def get_historical_klines(self) -> pd.DataFrame:
-        """Obtém dados históricos da Binance e adiciona indicadores técnicos. Usa cache se disponível."""
+    def get_historical_klines(self, add_indicators=True) -> pd.DataFrame:
+        """
+        Obtém dados históricos da Binance e opcionalmente adiciona indicadores técnicos.
+
+        Args:
+            add_indicators: Se True, adiciona indicadores técnicos. Se False, retorna apenas dados OHLCV.
+
+        Returns:
+            pd.DataFrame: DataFrame com dados históricos
+        """
         try:
             filepath = self.check_existing_data()
             if filepath:
                 logger.info(f"Arquivo encontrado em cache: {filepath}. Carregando dados do arquivo.")
                 df = pd.read_csv(filepath, sep=';', encoding='utf-8', parse_dates=['timestamp'], index_col='timestamp')
+                # Se temos dados de cache mas não queremos indicadores,
+                # verificamos se há colunas além de OHLCV e as removemos
+                if not add_indicators and len(df.columns) > 5:
+                    df = df[['open', 'high', 'low', 'close', 'volume']]
                 return df
 
             logger.info(f"Coletando dados para {self.config.symbol} - "
@@ -174,11 +186,15 @@ class DataCollector:
 
             logger.info(f"Coleta concluída: {len(df)} registros.")
 
-            # Adiciona indicadores técnicos
-            df = TechnicalIndicatorAdder.add_technical_indicators(df)
-
-            # Salva o CSV atualizado com indicadores técnicos
-            self.save_to_csv(df)
+            # Adiciona indicadores técnicos apenas se solicitado
+            if add_indicators:
+                df = TechnicalIndicatorAdder.add_technical_indicators(df)
+                # Salva o CSV atualizado com indicadores técnicos
+                self.save_to_csv(df)
+            else:
+                # Opcionalmente, podemos salvar os dados brutos com um sufixo diferente
+                # self.save_to_csv(df, suffix="_raw")
+                pass
 
             return df
         except BinanceAPIException as e:

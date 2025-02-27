@@ -11,7 +11,7 @@ from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
 from models.lstm.trainer import LSTMTrainer
 from models.managers.model_manager import ModelManager
-from repositories.data_handler import DataCollector, LabelCreator
+from repositories.data_handler import DataCollector, LabelCreator, TechnicalIndicatorAdder
 from repositories.data_preprocessor import DataPreprocessor
 
 
@@ -93,19 +93,17 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
     Returns:
         Tupla contendo o modelo, o treinador e as configurações.
     """
-    # Configurar modelo e trainer
     model_config = LSTMConfig(
         model_name=f"lstm_btc_{target_column}",
         version="1.1.0",
         description=f"Modelo LSTM para previsão de {target_column} do Bitcoin",
-        # Parâmetros específicos do LSTM otimizados para CPU
-        sequence_length=16,  # OTIMIZAÇÃO: Reduzido de 24 para 16 (menos contexto temporal, mais rápido)
-        lstm_units=[64, 32],  # OTIMIZAÇÃO: Reduzido de [128, 64] para [64, 32] (menos computação)
-        dense_units=[16],  # OTIMIZAÇÃO: Reduzido de [32] para [16] (menos computação)
-        dropout_rate=0.1,  # OTIMIZAÇÃO: Reduzido de 0.2 para 0.1 (menos regularização, mais rápido)
-        learning_rate=0.002,  # OTIMIZAÇÃO: Aumentado para convergência mais rápida
-        batch_size=64,  # OTIMIZAÇÃO: Aumentado para melhor utilização de cache/memória
-        epochs=50  # OTIMIZAÇÃO: Reduzido para treinamento mais rápido
+        sequence_length=24,
+        lstm_units=[128, 64],
+        dense_units=[32],
+        dropout_rate=0.2,
+        learning_rate=0.001,
+        batch_size=64,
+        epochs=100
     )
 
     training_config = LSTMTrainingConfig(
@@ -120,7 +118,6 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
         shuffle=False
     )
 
-    # Criar modelo e trainer
     model = LSTMModel(model_config)
     trainer = LSTMTrainer(model, training_config)
 
@@ -130,10 +127,15 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
 def collect_and_prepare_data():
     """
     Coleta dados históricos da Binance e prepara-os para treinamento
-    com limpeza e normalização adequada.
+    seguindo a sequência adequada:
+    1. Coleta dados brutos OHLCV
+    2. Remove outliers nos dados OHLCV
+    3. Calcula indicadores técnicos nos dados OHLCV limpos
+    4. Cria labels baseadas nos indicadores
+    5. Realiza normalização e processamento final de todas as features
     """
     try:
-        # Coletar dados com timeout adequado
+        # 1. Coletar dados brutos (sem indicadores)
         client = Client(
             settings.BINANCE_API_KEY,
             settings.BINANCE_API_SECRET,
@@ -141,38 +143,66 @@ def collect_and_prepare_data():
         )
 
         data_collector = DataCollector(client)
-        df = data_collector.get_historical_klines()
+        # Obter apenas dados OHLCV sem indicadores técnicos
+        raw_df = data_collector.get_historical_klines(add_indicators=False)
 
-        if df.empty:
+        if raw_df.empty:
             logger.error("Não foi possível coletar dados históricos")
             return None
 
-        # Criar labels
-        df = LabelCreator.create_labels(df)
+        logger.info(f"Dados brutos coletados: {len(raw_df)} registros")
 
-        if df.empty:
+        # 2. Processar os dados OHLCV para remover outliers
+        # Criar um preprocessador temporário apenas para OHLCV
+        ohlcv_columns = ['open', 'high', 'low', 'close', 'volume']
+        ohlcv_preprocessor = DataPreprocessor(
+            feature_columns=ohlcv_columns,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
+        ohlcv_preprocessor.fit(raw_df)
+
+        # Detectar e remover outliers apenas (sem normalizar ainda)
+        cleaned_df = ohlcv_preprocessor.detect_outliers(raw_df)
+
+        logger.info(f"Outliers removidos dos dados OHLCV. Processando indicadores...")
+
+        # 3. Calcular indicadores técnicos nos dados OHLCV limpos
+        df_with_indicators = TechnicalIndicatorAdder.add_technical_indicators(cleaned_df)
+
+        if df_with_indicators.empty:
+            logger.error("Falha ao adicionar indicadores técnicos")
+            return None
+
+        logger.info(f"Indicadores técnicos calculados com sucesso: {len(df_with_indicators.columns)} colunas")
+
+        # 4. Criar labels baseadas nos dados com indicadores limpos
+        df_with_labels = LabelCreator.create_labels(df_with_indicators)
+
+        if df_with_labels.empty:
             logger.error("Não foi possível criar labels")
             return None
 
-        # Preprocessar os dados antes do treinamento
-        preprocessor = DataPreprocessor(
+        logger.info("Labels criadas com sucesso")
+
+        # 5. Normalizar e processar todas as features para o modelo
+        full_preprocessor = DataPreprocessor(
             feature_columns=FEATURE_COLUMNS,
             outlier_method='iqr',
             scaling_method='robust'
         )
+        full_preprocessor.fit(df_with_labels)
 
-        # Ajustar o preprocessador aos dados
-        preprocessor.fit(df)
+        # Processar o DataFrame para o modelo (normalização, conversão de tipos, etc.)
+        df_processed = full_preprocessor.process_dataframe(df_with_labels)
 
-        # Processar o DataFrame (remover outliers e normalizar)
-        df_processed = preprocessor.process_dataframe(df)
-
-        logger.info(f"Dados preprocessados. Tamanho final: {len(df_processed)} linhas")
+        logger.info(
+            f"Dados processados com sucesso. Tamanho final: {len(df_processed)} linhas, {len(df_processed.columns)} colunas")
 
         return df_processed
 
     except Exception as e:
-        logger.error(f"Erro ao coletar e preparar dados: {e}")
+        logger.error(f"Erro ao coletar e preparar dados: {e}", exc_info=True)
         return None
 
 def main():

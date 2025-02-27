@@ -14,7 +14,7 @@ class LSTMConfig(ModelConfig):
     dense_units: list[int] = Field([32], description="Unidades para cada camada densa")
     dropout_rate: float = Field(0.2, ge=0, le=1, description="Taxa de dropout")
     learning_rate: float = Field(0.001, gt=0, description="Taxa de aprendizado")
-    batch_size: int = Field(32, gt=0, description="Tamanho do batch")
+    batch_size: int = Field(64, gt=0, description="Tamanho do batch")
     epochs: int = Field(100, gt=0, description="Número de épocas para treinamento")
 
 class LSTMTrainingConfig(TrainingConfig):
