@@ -117,9 +117,35 @@ class LSTMTrainer(BaseTrainer):
                     )
                 )
 
+            # Verificar e garantir que todos os dados são numéricos
+            # Converter para numpy arrays e forçar tipo numérico
+            X_train_numeric = X_train.astype(np.float64)
+            y_train_numeric = y_train.astype(np.float64)
+
+            # Log para debug
+            logger.info(f"X_train dtype: {X_train_numeric.dtypes.unique()}")
+            logger.info(f"y_train dtype: {y_train_numeric.dtype}")
+
             # Converter para numpy arrays
-            X_np = X_train.values
-            y_np = y_train.values.reshape(-1, 1)  # Garante que y seja 2D
+            X_np = X_train_numeric.values
+            y_np = y_train_numeric.values.reshape(-1, 1)  # Garante que y seja 2D
+
+            # Verificar valores infinitos, NaN, etc.
+            if np.isnan(X_np).any():
+                logger.warning("Valores NaN encontrados em X_train. Substituindo por zeros.")
+                X_np = np.nan_to_num(X_np, nan=0.0)
+
+            if np.isnan(y_np).any():
+                logger.warning("Valores NaN encontrados em y_train. Substituindo por zeros.")
+                y_np = np.nan_to_num(y_np, nan=0.0)
+
+            if (~np.isfinite(X_np)).any():
+                logger.warning("Valores infinitos encontrados em X_train. Substituindo.")
+                X_np = np.nan_to_num(X_np, nan=0.0, posinf=1e10, neginf=-1e10)
+
+            if (~np.isfinite(y_np)).any():
+                logger.warning("Valores infinitos encontrados em y_train. Substituindo.")
+                y_np = np.nan_to_num(y_np, nan=0.0, posinf=1e10, neginf=-1e10)
 
             # Preparar sequências - agora tratando X e y separadamente
             X_sequences, y_sequences = self._prepare_sequences(
@@ -128,8 +154,18 @@ class LSTMTrainer(BaseTrainer):
                 self.model.config.sequence_length
             )
 
+            # Verificar novamente valores numéricos depois de preparar sequências
+            if not np.issubdtype(X_sequences.dtype, np.floating):
+                logger.warning(f"Forçando conversão de X_sequences para float64. Tipo atual: {X_sequences.dtype}")
+                X_sequences = X_sequences.astype(np.float64)
+
+            if not np.issubdtype(y_sequences.dtype, np.floating):
+                logger.warning(f"Forçando conversão de y_sequences para float64. Tipo atual: {y_sequences.dtype}")
+                y_sequences = y_sequences.astype(np.float64)
+
             # Log de dimensões para debugging
             logger.info(f"Dimensões das sequências de treino: X={X_sequences.shape}, y={y_sequences.shape}")
+            logger.info(f"Tipos das sequências: X={X_sequences.dtype}, y={y_sequences.dtype}")
 
             # Verificar compatibilidade com o modelo
             expected_shape = self.model.model.input_shape

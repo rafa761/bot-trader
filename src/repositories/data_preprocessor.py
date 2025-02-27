@@ -332,13 +332,14 @@ class DataPreprocessor:
 
     def process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Processa um DataFrame completo, incluindo limpeza de outliers e normalização.
+        Processa um DataFrame completo, incluindo limpeza de outliers, normalização e
+        conversão de tipos para garantir que todas as colunas sejam numéricas.
 
         Args:
             df: DataFrame a ser processado
 
         Returns:
-            DataFrame processado
+            DataFrame processado com todas as colunas em formato numérico
         """
         # Verificar colunas existentes
         missing_cols = [col for col in self.feature_columns if col not in df.columns]
@@ -357,5 +358,103 @@ class DataPreprocessor:
 
         # 3. Normalizar os dados
         df_normalized = self.normalize(df_clean)
+
+        # 4. Converter colunas categóricas para numéricas
+        for col in self.categorical_columns:
+            if col in df_normalized.columns:
+                logger.info(f"Convertendo coluna categórica '{col}' para numérica")
+
+                if col == 'trend_strength':
+                    # Mapear valores de força de tendência
+                    strength_map = {
+                        'Ausente': 0.0,
+                        'Fraca': 0.25,
+                        'Moderada': 0.5,
+                        'Forte': 0.75,
+                        'Extrema': 1.0
+                    }
+                    df_normalized[col] = df_normalized[col].map(strength_map).fillna(0.5)
+
+                elif col == 'volatility_class':
+                    # Mapear classificação de volatilidade
+                    vol_map = {
+                        'Muito Baixa': 0.0,
+                        'Baixa': 0.25,
+                        'Média': 0.5,
+                        'Alta': 0.75,
+                        'Extrema': 1.0
+                    }
+                    df_normalized[col] = df_normalized[col].map(vol_map).fillna(0.5)
+
+                elif col == 'volume_class':
+                    # Mapear classificação de volume
+                    vol_class_map = {
+                        'Muito Baixo': 0.0,
+                        'Baixo': 0.25,
+                        'Normal': 0.5,
+                        'Alto': 0.75,
+                        'Muito Alto': 1.0
+                    }
+                    df_normalized[col] = df_normalized[col].map(vol_class_map).fillna(0.5)
+
+                elif col == 'market_phase':
+                    # Garantir que market_phase é float (já deve ser)
+                    df_normalized[col] = df_normalized[col].astype(float)
+
+                elif col == 'supertrend_direction':
+                    # Garantir que supertrend_direction é float (já deve ser)
+                    df_normalized[col] = df_normalized[col].astype(float)
+
+                else:
+                    # Para outras colunas categóricas, convertemos para one-hot encoding simples
+                    # ou para valores de 0 a N-1
+                    if df_normalized[col].dtype == 'object':
+                        unique_values = df_normalized[col].unique()
+                        value_map = {val: idx / len(unique_values) for idx, val in enumerate(unique_values)}
+                        df_normalized[col] = df_normalized[col].map(value_map).fillna(0.0)
+
+        # 5. Verificar e garantir que todas as colunas são numéricas
+        non_numeric_cols = [col for col in df_normalized.columns if
+                            not np.issubdtype(df_normalized[col].dtype, np.number)]
+
+        if non_numeric_cols:
+            logger.warning(f"Convertendo colunas não numéricas para float: {non_numeric_cols}")
+            for col in non_numeric_cols:
+                try:
+                    # Tentar converter para float
+                    df_normalized[col] = pd.to_numeric(df_normalized[col], errors='coerce').fillna(0.0)
+                except Exception as e:
+                    logger.error(f"Não foi possível converter a coluna {col} para numérico: {e}")
+                    # Se falhar, remover a coluna
+                    if col in self.feature_columns:
+                        logger.warning(
+                            f"Removendo coluna {col} das features por não ser possível convertê-la para numérico")
+                        self.feature_columns.remove(col)
+
+        # 6. Verificar novamente se há valores NaN e substituí-los por zeros
+        if df_normalized.isnull().values.any():
+            logger.warning("Ainda existem valores NaN após normalização. Substituindo por zeros.")
+            df_normalized = df_normalized.fillna(0.0)
+
+        # 7. Verificar se há valores infinitos e substituí-los
+        if (~np.isfinite(df_normalized.values)).any():
+            logger.warning("Valores infinitos encontrados. Substituindo por valores extremos.")
+            df_normalized = df_normalized.replace([np.inf, -np.inf], [1e10, -1e10])
+
+        # 8. Verificação final de tipos de dados
+        for col in df_normalized.columns:
+            if not np.issubdtype(df_normalized[col].dtype, np.number):
+                logger.error(f"ALERTA: A coluna {col} ainda não é numérica após todo o processamento!")
+
+                # Último recurso: forçar conversão ou remover
+                try:
+                    df_normalized[col] = df_normalized[col].astype(float)
+                except:
+                    if col in df_normalized.columns:
+                        logger.warning(f"Removendo coluna problemática: {col}")
+                        df_normalized = df_normalized.drop(columns=[col])
+
+        # 9. Garantir que todas as colunas são float64 para consistência
+        df_normalized = df_normalized.astype(np.float64)
 
         return df_normalized

@@ -781,26 +781,26 @@ class TechnicalIndicatorAdder:
 class LabelConfig(BaseModel):
     """Configuração otimizada para criação de labels em day trading de 15 minutos"""
     # Horizonte baseado na configuração existente
-    base_horizon: int = Field(settings.MODEL_DATA_PREDICTION_HORIZON, gt=0,
+    base_horizon: int = Field(6, gt=0,
                               description="Horizonte de previsão base em períodos (do settings)")
-    min_horizon: int = Field(lambda: int(settings.MODEL_DATA_PREDICTION_HORIZON * 0.7), gt=0,
+    min_horizon: int = Field(4, gt=0,
                              description="Horizonte mínimo para mercados voláteis")
-    max_horizon: int = Field(lambda: int(settings.MODEL_DATA_PREDICTION_HORIZON * 1.5), gt=0,
+    max_horizon: int = Field(10, gt=0,
                              description="Horizonte máximo para mercados lentos")
 
     # Configurações de movimento de preço
     min_price_move: float = Field(0.35, description="Movimento mínimo percentual para considerar sinal")
 
     # Take profit e stop loss
-    base_rr_ratio: float = Field(settings.MIN_RR_RATIO,
+    base_rr_ratio: float = Field(1.5,
                                  description="Razão base entre take profit e stop loss (do settings)")
-    trend_rr_ratio: float = Field(lambda: settings.MIN_RR_RATIO * 1.2,
+    trend_rr_ratio: float = Field(2.0,
                                   description="Razão R:R otimizada para mercados em tendência")
-    range_rr_ratio: float = Field(lambda: max(1.0, settings.MIN_RR_RATIO * 0.9),
+    range_rr_ratio: float = Field(1.2,
                                   description="Razão R:R otimizada para mercados em range")
 
     # ATR para stops dinâmicos
-    atr_sl_multiplier: float = Field(settings.ATR_MULTIPLIER,
+    atr_sl_multiplier: float = Field(1.5,
                                      description="Multiplicador do ATR para stop loss (do settings)")
 
     # Take profit parcial
@@ -814,8 +814,8 @@ class LabelConfig(BaseModel):
     min_tp_pct: float = Field(0.5, description="Mínimo take profit percentual para day trading")
 
     # Ajuste dos limiares de qualidade baseados nas configurações existentes
-    quality_threshold: float = Field(settings.ENTRY_THRESHOLD_DEFAULT,
-                                     description="Limiar de qualidade para considerar um trade válido (do settings)")
+    quality_threshold: float = Field(0.6,
+                                     description="Limiar de qualidade para considerar um trade válido")
 
     # Flags de condição de mercado
     trend_aligned_bonus: float = Field(0.2,
@@ -827,24 +827,50 @@ class LabelConfig(BaseModel):
 
     class Config:
         """Configuração adicional do modelo Pydantic"""
-        validate_assignment = True
         arbitrary_types_allowed = True
+        validate_assignment = True
 
     def __init__(self, **data):
-        """Inicialização com valores padrão dinâmicos baseados em settings"""
-        # Se min_horizon ou max_horizon não estão definidos, calcular baseado em base_horizon
+        """
+        Inicialização com valores ajustados baseados em settings
+        """
+        # Usar valores explícitos ao invés de funções lambda
+        if 'base_horizon' not in data:
+            data['base_horizon'] = int(settings.MODEL_DATA_PREDICTION_HORIZON)
+
         if 'base_horizon' in data and 'min_horizon' not in data:
             data['min_horizon'] = max(4, int(data['base_horizon'] * 0.7))
+
         if 'base_horizon' in data and 'max_horizon' not in data:
             data['max_horizon'] = max(8, int(data['base_horizon'] * 1.5))
 
         # Configurações relacionadas ao R:R
-        if 'base_rr_ratio' in data and 'trend_rr_ratio' not in data:
-            data['trend_rr_ratio'] = data['base_rr_ratio'] * 1.2
-        if 'base_rr_ratio' in data and 'range_rr_ratio' not in data:
-            data['range_rr_ratio'] = max(1.0, data['base_rr_ratio'] * 0.9)
+        if 'base_rr_ratio' not in data:
+            data['base_rr_ratio'] = float(settings.MIN_RR_RATIO)
 
+        if 'base_rr_ratio' in data and 'trend_rr_ratio' not in data:
+            data['trend_rr_ratio'] = float(data['base_rr_ratio'] * 1.2)
+
+        if 'base_rr_ratio' in data and 'range_rr_ratio' not in data:
+            data['range_rr_ratio'] = max(1.0, float(data['base_rr_ratio'] * 0.9))
+
+        # Configuração do multiplicador ATR
+        if 'atr_sl_multiplier' not in data:
+            data['atr_sl_multiplier'] = float(settings.ATR_MULTIPLIER)
+
+        # Limiares de qualidade
+        if 'quality_threshold' not in data:
+            data['quality_threshold'] = float(settings.ENTRY_THRESHOLD_DEFAULT)
+
+        # Chamar o construtor da classe pai
         super().__init__(**data)
+
+        # Verificar e garantir que os valores são dos tipos corretos
+        assert isinstance(self.base_horizon, int), f"base_horizon deve ser int, não {type(self.base_horizon)}"
+        assert isinstance(self.min_horizon, int), f"min_horizon deve ser int, não {type(self.min_horizon)}"
+        assert isinstance(self.max_horizon, int), f"max_horizon deve ser int, não {type(self.max_horizon)}"
+        assert isinstance(self.base_rr_ratio, float), f"base_rr_ratio deve ser float, não {type(self.base_rr_ratio)}"
+
 
 class LabelCreator:
     @classmethod
@@ -890,8 +916,10 @@ class LabelCreator:
 
             # Ajustar horizonte baseado em volatilidade (mais curto quando volátil, mais longo quando calmo)
             # Fórmula: horizonte = máximo - (máximo - mínimo) * volatilidade_normalizada
-            adaptive_horizon = (
-                    config.max_horizon - (config.max_horizon - config.min_horizon) * norm_volatility).astype(int)
+            # Garantir que config.max_horizon e config.min_horizon são inteiros, não funções
+            max_h = int(config.max_horizon)
+            min_h = int(config.min_horizon)
+            adaptive_horizon = (max_h - ((max_h - min_h) * norm_volatility)).astype(int)
 
             # 2. Detectar fase do mercado (se 'market_phase' estiver disponível nos indicadores)
             if 'market_phase' in df_result.columns:
@@ -901,20 +929,21 @@ class LabelCreator:
                 ema_short = ta.trend.EMAIndicator(close=df_result['close'], window=8).ema_indicator()
                 ema_long = ta.trend.EMAIndicator(close=df_result['close'], window=21).ema_indicator()
 
-                market_phase = pd.Series(0, index=df_result.index)  # 0: Range, 1: Alta, -1: Baixa
+                market_phase = pd.Series(0.0, index=df_result.index)  # 0: Range, 1: Alta, -1: Baixa
                 market_phase.loc[
-                    (ema_short > ema_long) & (ema_short.shift(3) < ema_long.shift(3))] = 1  # Tendência de alta
+                    (ema_short > ema_long) & (ema_short.shift(3) < ema_long.shift(3))] = 1.0  # Tendência de alta
                 market_phase.loc[
-                    (ema_short < ema_long) & (ema_short.shift(3) > ema_long.shift(3))] = -1  # Tendência de baixa
+                    (ema_short < ema_long) & (ema_short.shift(3) > ema_long.shift(3))] = -1.0  # Tendência de baixa
 
             # 3. Calcular futuros máximos e mínimos para cada barra (usando horizonte adaptativo)
             df_result['future_high'] = np.nan
             df_result['future_low'] = np.nan
+            df_result['used_horizon'] = np.nan
 
             # Para cada linha, calculamos o futuro máximo e mínimo baseado no horizonte adaptativo
-            for i in range(len(df_result) - config.max_horizon):
+            for i in range(len(df_result) - max_h):
                 horizon = adaptive_horizon.iloc[i]
-                horizon = max(horizon, config.min_horizon)  # Garantir que não seja menor que o mínimo
+                horizon = max(horizon, min_h)  # Garantir que não seja menor que o mínimo
 
                 if i + horizon < len(df_result):
                     df_result.loc[df_result.index[i], 'future_high'] = df_result['high'].iloc[
@@ -1001,19 +1030,19 @@ class LabelCreator:
             df_result['trade_quality'] = df_result['trade_quality_raw'].clip(0, 1)
 
             # 12. Gerar sinal binário baseado no limiar de qualidade
-            df_result['trade_signal'] = (df_result['trade_quality'] > config.quality_threshold).astype(int)
+            df_result['trade_signal'] = (df_result['trade_quality'] > config.quality_threshold).astype(float)
 
             # 13. Gerar sinais de direção
             df_result['long_signal'] = ((df_result['trade_signal'] == 1) &
-                                        (df_result['raw_tp_pct'] > df_result['raw_sl_pct'])).astype(int)
+                                        (df_result['raw_tp_pct'] > df_result['raw_sl_pct'])).astype(float)
             df_result['short_signal'] = ((df_result['trade_signal'] == 1) &
-                                         (df_result['raw_tp_pct'] < df_result['raw_sl_pct'])).astype(int)
+                                         (df_result['raw_tp_pct'] < df_result['raw_sl_pct'])).astype(float)
 
             # 14. Adicionar flag para alinhamento com tendência maior (para filtro adicional)
             if 'supertrend_direction' in df_result.columns:
                 df_result['aligned_with_supertrend'] = (
                         (df_result['long_signal'] == 1) & (df_result['supertrend_direction'] == 1) |
-                        (df_result['short_signal'] == 1) & (df_result['supertrend_direction'] == -1)).astype(int)
+                        (df_result['short_signal'] == 1) & (df_result['supertrend_direction'] == -1)).astype(float)
 
             # 15. Limpar valores infinitos e NaN
             df_result.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -1033,11 +1062,60 @@ class LabelCreator:
                 logger.info(f"Percentual de sinais gerados: {signal_pct:.2f}%")
 
                 if 'aligned_with_supertrend' in valid_data.columns:
-                    aligned_pct = valid_data['aligned_with_supertrend'].sum() / valid_data['trade_signal'].sum() * 100
+                    aligned_pct = valid_data['aligned_with_supertrend'].sum() / valid_data[
+                        'trade_signal'].sum() * 100 if valid_data['trade_signal'].sum() > 0 else 0
                     logger.info(f"Percentual de sinais alinhados com tendência: {aligned_pct:.2f}%")
 
             return df_result
 
         except Exception as e:
             logger.error(f"Erro ao criar labels otimizados: {e}", exc_info=True)
-            return df
+            # Caso falhe, usar a abordagem mais simples
+            try:
+                logger.warning("Tentando método alternativo de criação de labels")
+                return cls.create_labels_simple(df)
+            except Exception as backup_error:
+                logger.error(f"Erro ao criar labels (método alternativo): {backup_error}")
+                return df
+
+    @classmethod
+    def create_labels_simple(cls, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Método simplificado de criação de labels quando o método principal falha.
+        Cria take_profit_pct e stop_loss_pct com base em máximos e mínimos futuros fixos.
+
+        Args:
+            df: DataFrame com dados OHLCV
+
+        Returns:
+            DataFrame com labels básicos adicionados
+        """
+        logger.info(f"Criando labels simples com horizon={settings.MODEL_DATA_PREDICTION_HORIZON} períodos.")
+
+        # Nova cópia para evitar modificações no original
+        df_result = df.copy()
+
+        # Usando horizonte fixo do settings
+        horizon = settings.MODEL_DATA_PREDICTION_HORIZON
+
+        # Calcular futuros máximos e mínimos
+        df_result['future_high'] = df_result['high'].rolling(window=horizon).max().shift(-horizon)
+        df_result['future_low'] = df_result['low'].rolling(window=horizon).min().shift(-horizon)
+
+        # Calcular take profit e stop loss percentuais
+        df_result['take_profit_pct'] = ((df_result['future_high'] - df_result['close']) / df_result['close']) * 100
+        df_result['stop_loss_pct'] = ((df_result['close'] - df_result['future_low']) / df_result['close']) * 100
+
+        # Calcular razão R:R
+        df_result['tp_sl_ratio'] = df_result['take_profit_pct'] / df_result['stop_loss_pct']
+
+        # Remover valores infinitos e NaN
+        df_result.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df_result.dropna(subset=['take_profit_pct', 'stop_loss_pct'], inplace=True)
+
+        # Remover colunas temporárias
+        df_result.drop(['future_high', 'future_low'], axis=1, errors='ignore', inplace=True)
+
+        logger.info("Labels simples criados com sucesso.")
+
+        return df_result
