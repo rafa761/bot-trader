@@ -1,5 +1,4 @@
 # services/trading_bot.py
-
 import asyncio
 from typing import Literal
 
@@ -11,6 +10,7 @@ from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from repositories.data_handler import DataHandler
+from repositories.data_preprocessor import DataPreprocessor
 from services.base.schemas import (
     MarketPatternResult,
     TradingParameters,
@@ -144,6 +144,12 @@ class LSTMSignalGenerator(SignalGenerator):
         self.strategy = strategy
         self.sequence_length = sequence_length
 
+        # Adicionar preprocessador
+        self.preprocessor: DataPreprocessor | None = None
+
+        # Flag para rastrear se o preprocessador já foi ajustado
+        self.preprocessor_fitted = False
+
     def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
         """
         Prepara uma sequência para previsão com modelo LSTM, ajustando o tamanho
@@ -155,55 +161,45 @@ class LSTMSignalGenerator(SignalGenerator):
         Returns:
             np.ndarray: Sequência formatada para o modelo LSTM ou None se houver erro
         """
-        from core.constants import FEATURE_COLUMNS
-
-        # Verifica se todos os FEATURE_COLUMNS existem no DataFrame
-        missing_columns = [col for col in FEATURE_COLUMNS if col not in df.columns]
-        if missing_columns:
-            logger.warning(f"Colunas ausentes no DataFrame: {missing_columns}")
-            return None
-
-        # Obtém o tamanho de sequência esperado pelo modelo
-        expected_sequence_length = self.tp_model.model.input_shape[1]
-        if expected_sequence_length != self.sequence_length:
-            logger.warning(
-                f"Ajustando sequence_length: configurado={self.sequence_length}, "
-                f"esperado pelo modelo={expected_sequence_length}"
-            )
-            self.sequence_length = expected_sequence_length
-
-        # Verifica se há dados suficientes
-        if len(df) < self.sequence_length:
-            logger.warning(
-                f"Dados insuficientes para LSTM. Necessário: {self.sequence_length}, "
-                f"Disponível: {len(df)}"
-            )
-            return None
-
-        # Verifica se há valores NaN nas features requeridas
-        if df[FEATURE_COLUMNS].isna().any().any():
-            logger.warning("Existem valores NaN nas features necessárias para o LSTM")
-            return None
-
         try:
-            # Pegar as últimas 'sequence_length' entradas para a previsão
-            last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
+            # Obter o comprimento da sequência esperado pelo modelo
+            expected_sequence_length = self.tp_model.model.input_shape[1]
 
-            # Verificar valores anormais
-            if np.isnan(last_sequence).any():
-                logger.warning("Valores NaN detectados na sequência!")
-                last_sequence = np.nan_to_num(last_sequence, nan=0.0)
+            # Ajustar o sequence_length se for diferente do esperado
+            if self.sequence_length != expected_sequence_length:
+                logger.warning(
+                    f"Ajustando sequence_length: configurado={self.sequence_length}, "
+                    f"esperado pelo modelo={expected_sequence_length}"
+                )
+                self.sequence_length = expected_sequence_length
 
-            # Reformatar para o formato que o LSTM espera [samples, time steps, features]
-            x_pred = np.array([last_sequence])
+            # Inicializar preprocessador (isso deve ser feito uma vez e salvo como atributo)
+            if self.preprocessor is None:
+                self.preprocessor = DataPreprocessor(
+                    feature_columns=FEATURE_COLUMNS,
+                    outlier_method='iqr',
+                    scaling_method='robust'
+                )
+                # Ajustar o preprocessador nos dados históricos
+                self.preprocessor.fit(df)
+
+            # Usar o preprocessador para preparar a sequência
+            x_pred = self.preprocessor.prepare_sequence_for_prediction(
+                df,
+                sequence_length=self.sequence_length
+            )
 
             # Verificar se o formato é compatível com o esperado pelo modelo
-            expected_shape = (None, expected_sequence_length, len(FEATURE_COLUMNS))
+            if x_pred is None:
+                return None
+
+            expected_shape = (None, self.tp_model.model.input_shape[1], len(FEATURE_COLUMNS))
             actual_shape = (x_pred.shape[0], x_pred.shape[1], x_pred.shape[2])
 
             logger.info(f"Shape da sequência preparada: {actual_shape}, esperado pelo modelo: {expected_shape}")
 
             return x_pred
+
         except Exception as e:
             logger.error(f"Erro ao preparar sequência para LSTM: {e}", exc_info=True)
             return None
@@ -624,6 +620,9 @@ class TradingBot:
         # Controle de ciclos
         self.cycle_count = 0
 
+        # Historico de previsoes
+        self.predictions_history = []
+
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
     def _load_pattern_classifier(self):
@@ -696,6 +695,13 @@ class TradingBot:
 
                 # 4. Gerar sinal de trading
                 signal = await self.signal_generator.generate_signal(df, current_price)
+                if signal:
+                    # Armazenar previsões no histórico
+                    self.predictions_history.append((signal.predicted_tp_pct, signal.predicted_sl_pct))
+
+                    # Monitorar diversidade das previsões
+                    self._monitor_predictions(self.predictions_history)
+
                 if not signal:
                     await asyncio.sleep(5)
                     continue
@@ -801,3 +807,30 @@ class TradingBot:
             f"Score de Entrada={entry_score:.2f}, "
             f"Threshold Ajustado={threshold:.2f}"
         )
+
+    def _monitor_predictions(self, predictions_history: list[tuple[float, float]], window: int = 50) -> None:
+        """
+        Monitora a diversidade das previsões para detectar problemas de estagnação.
+
+        Args:
+            predictions_history: Lista com histórico de previsões (TP%, SL%)
+            window: Tamanho da janela para análise
+        """
+        if len(predictions_history) < window:
+            return
+
+        # Analisar últimas previsões
+        recent_predictions = predictions_history[-window:]
+        tp_values = [tp for tp, _ in recent_predictions]
+        sl_values = [sl for _, sl in recent_predictions]
+
+        # Calcular estatísticas
+        tp_std = np.std(tp_values)
+        sl_std = np.std(sl_values)
+
+        # Alertar se houver pouca variação
+        if tp_std < 0.05 and sl_std < 0.05:  # Menos de 0.05% de desvio padrão
+            logger.warning(
+                f"ALERTA: Pouca variação nas previsões! TP std={tp_std:.4f}%, SL std={sl_std:.4f}%. "
+                f"Considere retreinar o modelo ou verificar o pipeline de dados."
+            )

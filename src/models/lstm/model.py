@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+from keras.api.layers import BatchNormalization
 from keras.api.layers import Input, LSTM, Dense, Dropout
 from keras.api.models import Model, load_model
 from keras.api.optimizers import Adam
@@ -53,13 +54,12 @@ class LSTMModel(BaseModel):
             # Definir input layer
             inputs = Input(shape=(self.config.sequence_length, self.n_features), name="input_layer")
 
-            # Aplicar normalização na entrada para estabilizar o treinamento
-            # Esta é uma modificação importante para evitar problemas de escala
-            x = inputs
+            # Adicionar normalização de batch para estabilizar o treinamento
+            # Esta é uma adição importante para evitar problemas de escala
+            x = BatchNormalization(name="batch_norm_input")(inputs)
 
-            # Primeira camada LSTM (mantendo complexidade adequada)
+            # Primeira camada LSTM
             is_single_lstm_layer = len(self.config.lstm_units) == 1
-
             x = LSTM(
                 units=self.config.lstm_units[0],
                 return_sequences=not is_single_lstm_layer,

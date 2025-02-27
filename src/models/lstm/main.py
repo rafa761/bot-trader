@@ -12,6 +12,7 @@ from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
 from models.lstm.trainer import LSTMTrainer
 from models.managers.model_manager import ModelManager
 from repositories.data_handler import DataCollector, LabelCreator
+from repositories.data_preprocessor import DataPreprocessor
 
 
 def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: str):
@@ -128,10 +129,8 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
 
 def collect_and_prepare_data():
     """
-    Coleta dados históricos da Binance e prepara-os para treinamento.
-
-    Returns:
-        DataFrame pandas contendo os dados preparados ou None se ocorrer erro.
+    Coleta dados históricos da Binance e prepara-os para treinamento
+    com limpeza e normalização adequada.
     """
     try:
         # Coletar dados com timeout adequado
@@ -155,12 +154,26 @@ def collect_and_prepare_data():
             logger.error("Não foi possível criar labels")
             return None
 
-        return df
+        # Preprocessar os dados antes do treinamento
+        preprocessor = DataPreprocessor(
+            feature_columns=FEATURE_COLUMNS,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
+
+        # Ajustar o preprocessador aos dados
+        preprocessor.fit(df)
+
+        # Processar o DataFrame (remover outliers e normalizar)
+        df_processed = preprocessor.process_dataframe(df)
+
+        logger.info(f"Dados preprocessados. Tamanho final: {len(df_processed)} linhas")
+
+        return df_processed
 
     except Exception as e:
         logger.error(f"Erro ao coletar e preparar dados: {e}")
         return None
-
 
 def main():
     """
