@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR, TRAINED_MODELS_BACKUP_DIR, TRAINED_MODELS_TEMP_DIR
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
@@ -253,10 +253,16 @@ class ModelRetrainer:
 
             # 1. Obter dados atualizados
             df = self.get_data_callback()
-
             if df is None or df.empty:
                 logger.error("Não foi possível obter dados para retreinamento")
                 return
+
+            if df is not None and not df.empty:
+                # Usar apenas os últimos N dados mais recentes para retreinamento incremental
+                max_samples = 1000
+                if len(df) > max_samples:
+                    logger.info(f"Limitando a {max_samples} amostras mais recentes para retreinamento incremental")
+                    df = df.tail(max_samples)
 
             # 2. Criar labels para treinamento (TP e SL)
             df = LabelCreator.create_labels(df)
@@ -306,11 +312,11 @@ class ModelRetrainer:
                 # Configurar trainer
                 training_config = LSTMTrainingConfig(
                     validation_split=0.15,
-                    early_stopping_patience=8,  # Reduzido para retreinamento mais rápido
-                    reduce_lr_patience=3,
-                    reduce_lr_factor=0.5,
+                    early_stopping_patience=5,
+                    reduce_lr_patience=2,
+                    reduce_lr_factor=0.6,
                     use_early_stopping=True,
-                    min_delta=0.001,
+                    min_delta=0.0008,
                     test_size=0.2,
                     random_state=42,
                     shuffle=False
@@ -320,24 +326,28 @@ class ModelRetrainer:
                 # Criar gerenciador para executar pipeline de treinamento
                 manager = ModelManager(model, trainer, retraining_config)
 
-                # Executar treinamento
-                # Usar um sufixo temporário para evitar sobrescrever o modelo em uso
-                temp_save_path = TRAINED_MODELS_DIR / "temp"
-                temp_save_path.mkdir(parents=True, exist_ok=True)
+                # Inicializar novo modelo com pesos do anterior (transfer learning)
+                try:
+                    if hasattr(base_model, 'model') and base_model.model is not None:
+                        logger.info("Aplicando transfer learning - copiando pesos do modelo anterior")
+                        model.model.set_weights(base_model.model.get_weights())
+                except Exception as e:
+                    logger.warning(f"Não foi possível aplicar transfer learning: {e}")
 
+                # Executa Retreinamento
                 try:
                     metrics = manager.execute_full_pipeline(
                         data=df_processed,
                         feature_columns=FEATURE_COLUMNS,
                         target_column=target,
-                        save_path=temp_save_path,
+                        save_path=TRAINED_MODELS_TEMP_DIR,
                     )
 
                     # Salvar referência ao novo modelo
                     new_models[target] = {
                         'model': model,
                         'metrics': metrics,
-                        'temp_path': temp_save_path / f"{retraining_config.model_name}.keras"
+                        'temp_path': TRAINED_MODELS_TEMP_DIR / f"{retraining_config.model_name}.keras"
                     }
 
                     logger.info(f"Retreinamento para {target} concluído com métricas: {metrics}")
@@ -413,13 +423,19 @@ class ModelRetrainer:
                 if 'take_profit_pct' in new_models:
                     tp_info = new_models['take_profit_pct']
 
-                    # Criar diretório de backup se não existir
-                    backup_dir = TRAINED_MODELS_DIR / "backups"
-                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    if 'test_loss' in tp_info['metrics'] and hasattr(self.tp_model,
+                                                                     'last_metrics') and 'test_loss' in self.tp_model.last_metrics:
+                        if tp_info['metrics']['test_loss'] >= self.tp_model.last_metrics[
+                            'test_loss'] * 0.95:  # 5% de tolerância
+                            logger.warning(
+                                f"Novo modelo TP não apresenta melhoria significativa. Loss atual: {self.tp_model.last_metrics['test_loss']}, novo: {tp_info['metrics']['test_loss']}. Mantendo modelo atual.")
+                            return False
+                        # Armazenar métricas para comparações futuras
+                        self.tp_model.last_metrics = tp_info['metrics']
 
                     # Fazer backup do modelo antigo com timestamp
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    backup_path = backup_dir / f"{self.tp_model.config.model_name}_{timestamp}.keras"
+                    backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.tp_model.config.model_name}_{timestamp}.keras"
 
                     if self.tp_model_path.exists():
                         try:
@@ -451,13 +467,9 @@ class ModelRetrainer:
                 if 'stop_loss_pct' in new_models:
                     sl_info = new_models['stop_loss_pct']
 
-                    # Criar diretório de backup se não existir
-                    backup_dir = TRAINED_MODELS_DIR / "backups"
-                    backup_dir.mkdir(parents=True, exist_ok=True)
-
                     # Fazer backup do modelo antigo com timestamp
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    backup_path = backup_dir / f"{self.sl_model.config.model_name}_{timestamp}.keras"
+                    backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.sl_model.config.model_name}_{timestamp}.keras"
 
                     if self.sl_model_path.exists():
                         try:

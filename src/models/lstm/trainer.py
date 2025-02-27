@@ -1,11 +1,13 @@
 # models\lstm\trainer.py
 
-from pathlib import Path
+import math
+import time
 
 import numpy as np
 import pandas as pd
-from keras.api.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from keras.api.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, LearningRateScheduler
 
+from core.constants import TRAINED_MODELS_CHECKPOINTS_DIR
 from core.logger import logger
 from models.base.trainer import BaseTrainer
 from models.lstm.model import LSTMModel
@@ -64,34 +66,31 @@ class LSTMTrainer(BaseTrainer):
 
         return X_seq, y_seq
 
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, checkpoint_dir: Path = None):
+    def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         """
-        Treina o modelo LSTM.
-
-        Prepara os dados, configura callbacks e executa o treinamento do modelo.
-
-        Args:
-            X_train: DataFrame pandas contendo as features de treinamento.
-            y_train: Series pandas contendo os alvos de treinamento.
-            checkpoint_dir: Diretório opcional para salvar checkpoints durante o treinamento.
-
-        Raises:
-            Exception: Se ocorrer algum erro durante o treinamento.
+        Treina o modelo LSTM com callbacks otimizados para hardware de alto desempenho.
         """
-        logger.info("Iniciando treinamento do modelo LSTM...")
+        logger.info("Iniciando treinamento do modelo LSTM com configuração otimizada...")
         try:
-            # Preparar callbacks
+            # Learning rate schedule personalizado
+            def lr_scheduler(epoch, lr):
+                if epoch < 10:
+                    return lr  # Manter taxa inicial para warm-up
+                else:
+                    # Decay exponencial suave
+                    return self.model.config.learning_rate * math.exp(-0.025 * (epoch - 10))
+
             callbacks = [
-                # Apenas adiciona ReduceLROnPlateau por padrão
+                LearningRateScheduler(lr_scheduler, verbose=1),
                 ReduceLROnPlateau(
                     monitor='val_loss',
-                    factor=self.config.reduce_lr_factor,
+                    factor=0.5,
                     patience=self.config.reduce_lr_patience,
+                    min_lr=1e-6,  # Definir limite mínimo
                     verbose=1
                 )
             ]
 
-            # Adicionar EarlyStopping apenas se configurado para usar
             if self.config.use_early_stopping:
                 callbacks.append(
                     EarlyStopping(
@@ -104,25 +103,47 @@ class LSTMTrainer(BaseTrainer):
                     )
                 )
 
-            # Adicionar checkpoint se diretório for fornecido
-            if checkpoint_dir:
-                checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                checkpoint_path = checkpoint_dir / f"{self.model.config.model_name}_checkpoint.h5"
-                callbacks.append(
-                    ModelCheckpoint(
-                        filepath=str(checkpoint_path),
-                        save_best_only=True,
-                        monitor='val_loss',
-                        verbose=1
-                    )
+            # Adicionar múltiplos checkpoints aproveitando o SSD rápido
+            # Checkpoint para melhor modelo por loss
+            callbacks.append(
+                ModelCheckpoint(
+                    filepath=str(
+                        TRAINED_MODELS_CHECKPOINTS_DIR / f"{self.model.config.model_name}_best_val_loss.keras"),
+                    save_best_only=True,
+                    monitor='val_loss',
+                    mode='min',
+                    verbose=1
                 )
+            )
+
+            # Checkpoint para melhor modelo por MAE
+            callbacks.append(
+                ModelCheckpoint(
+                    filepath=str(TRAINED_MODELS_CHECKPOINTS_DIR / f"{self.model.config.model_name}_best_val_mae.keras"),
+                    save_best_only=True,
+                    monitor='val_mae',
+                    mode='min',
+                    verbose=1
+                )
+            )
+
+            # Checkpoint periódico a cada 10 épocas
+            callbacks.append(
+                ModelCheckpoint(
+                    filepath=str(
+                        TRAINED_MODELS_CHECKPOINTS_DIR / f"{self.model.config.model_name}_epoch_{{epoch:03d}}.keras"),
+                    # Calcular frequência para salvar a cada 10 épocas (número de batches por época * 10)
+                    save_freq=int(len(X_train) // self.model.config.batch_size * 10),
+                    save_best_only=False,
+                    verbose=0
+                )
+            )
 
             # Verificar e garantir que todos os dados são numéricos
             # Converter para numpy arrays e forçar tipo numérico
             X_train_numeric = X_train.astype(np.float64)
             y_train_numeric = y_train.astype(np.float64)
 
-            # Log para debug
             logger.info(f"X_train dtype: {X_train_numeric.dtypes.unique()}")
             logger.info(f"y_train dtype: {y_train_numeric.dtype}")
 
@@ -147,12 +168,18 @@ class LSTMTrainer(BaseTrainer):
                 logger.warning("Valores infinitos encontrados em y_train. Substituindo.")
                 y_np = np.nan_to_num(y_np, nan=0.0, posinf=1e10, neginf=-1e10)
 
-            # Preparar sequências - agora tratando X e y separadamente
+            # Medir o tempo de preparação das sequências
+            start_prep_time = time.time()
+
+            # Preparar sequências
             X_sequences, y_sequences = self._prepare_sequences(
                 X_np,
                 y_np,
                 self.model.config.sequence_length
             )
+
+            prep_time = time.time() - start_prep_time
+            logger.info(f"Preparação de sequências concluída em {prep_time:.2f} segundos")
 
             # Verificar novamente valores numéricos depois de preparar sequências
             if not np.issubdtype(X_sequences.dtype, np.floating):
@@ -163,7 +190,6 @@ class LSTMTrainer(BaseTrainer):
                 logger.warning(f"Forçando conversão de y_sequences para float64. Tipo atual: {y_sequences.dtype}")
                 y_sequences = y_sequences.astype(np.float64)
 
-            # Log de dimensões para debugging
             logger.info(f"Dimensões das sequências de treino: X={X_sequences.shape}, y={y_sequences.shape}")
             logger.info(f"Tipos das sequências: X={X_sequences.dtype}, y={y_sequences.dtype}")
 
@@ -183,6 +209,9 @@ class LSTMTrainer(BaseTrainer):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {X_sequences.shape[2]}"
                     )
 
+            # Medir tempo de treinamento
+            start_train_time = time.time()
+
             # Treinar modelo
             self.history = self.model.model.fit(
                 X_sequences,
@@ -194,7 +223,9 @@ class LSTMTrainer(BaseTrainer):
                 verbose=1
             )
 
-            logger.info("Treinamento concluído com sucesso")
+            training_time = time.time() - start_train_time
+            logger.info(f"Treinamento concluído em {training_time:.2f} segundos")
+            logger.info(f"Melhor val_loss: {min(self.history.history['val_loss']):.4f}")
 
         except Exception as e:
             logger.error(f"Erro durante treinamento: {e}")

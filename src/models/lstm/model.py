@@ -7,6 +7,7 @@ from keras.api.layers import BatchNormalization
 from keras.api.layers import Input, LSTM, Dense, Dropout
 from keras.api.models import Model, load_model
 from keras.api.optimizers import Adam
+from keras.api.regularizers import L2
 
 from core.constants import FEATURE_COLUMNS
 from core.logger import logger
@@ -40,20 +41,14 @@ class LSTMModel(BaseModel):
     def build_model(self):
         """
         Constrói a arquitetura do modelo LSTM com base na configuração.
-
-        Cria uma rede neural com camadas LSTM seguidas por camadas densas,
-        conforme especificado na configuração.
-
-        Raises:
-            Exception: Se ocorrer algum erro durante a construção do modelo.
+        Versão otimizada para hardware de alto desempenho.
         """
         logger.info("Construindo arquitetura do modelo LSTM...")
         try:
             # Definir input layer
             inputs = Input(shape=(self.config.sequence_length, self.n_features), name="input_layer")
 
-            # Adicionar normalização de batch para estabilizar o treinamento
-            # Esta é uma adição importante para evitar problemas de escala
+            # Normalização de batch para estabilizar o treinamento
             x = BatchNormalization(name="batch_norm_input")(inputs)
 
             # Primeira camada LSTM
@@ -62,10 +57,12 @@ class LSTMModel(BaseModel):
                 units=self.config.lstm_units[0],
                 return_sequences=not is_single_lstm_layer,
                 name="lstm",
-                activation='tanh',  # Ativação explícita
-                recurrent_activation='sigmoid',  # Ativação recorrente explícita
-                recurrent_dropout=0.0,  # Evitar recurrent_dropout em inferência
-                unroll=True
+                activation='tanh',
+                recurrent_activation='sigmoid',
+                recurrent_dropout=self.config.recurrent_dropout_rate,
+                kernel_regularizer=L2(self.config.l2_regularization),
+                recurrent_regularizer=L2(self.config.l2_regularization / 2),
+                unroll=False
             )(x)
             x = Dropout(self.config.dropout_rate, name="dropout")(x)
 
@@ -78,29 +75,40 @@ class LSTMModel(BaseModel):
                     name=f"lstm_{i}",
                     activation='tanh',
                     recurrent_activation='sigmoid',
-                    recurrent_dropout=0.0,
-                    unroll=True
+                    recurrent_dropout=self.config.recurrent_dropout_rate,
+                    kernel_regularizer=L2(self.config.l2_regularization),
+                    recurrent_regularizer=L2(self.config.l2_regularization / 2),
+                    unroll=False
                 )(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i}")(x)
 
-            # Camadas densas com tamanho adequado
+            # Camadas densas expandidas
             for i, units in enumerate(self.config.dense_units):
-                x = Dense(units=units, activation='relu', name=f"dense_{i}")(x)
+                x = Dense(
+                    units=units,
+                    activation='relu',
+                    name=f"dense_{i}",
+                    kernel_regularizer=L2(self.config.l2_regularization)
+                )(x)
+                x = BatchNormalization(name=f"batch_norm_dense_{i}")(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i + len(self.config.lstm_units)}")(x)
 
-            # Camada de saída - sem ativação linear para permitir previsões positivas e negativas
+            # Camada de saída - sem ativação linear
             outputs = Dense(units=1, activation='linear', name="output")(x)
 
             # Criar modelo
             self.model = Model(inputs=inputs, outputs=outputs)
 
-            # Compilar modelo com otimizador mais configurável
-            optimizer = Adam(learning_rate=self.config.learning_rate)
+            # Compilar modelo com otimizador avançado
+            optimizer = Adam(
+                learning_rate=self.config.learning_rate,
+                amsgrad=self.config.use_amsgrad
+            )
 
             self.model.compile(
                 optimizer=optimizer,
                 loss='mse',
-                metrics=['mae']
+                metrics=['mae', 'mse']
             )
 
             logger.info("Modelo LSTM construído com sucesso")

@@ -122,6 +122,15 @@ CATEGORICAL_FEATURES = [
 TRAINED_MODELS_DIR = Path(__file__).resolve().parent.parent / "trained_models"
 TRAINED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+TRAINED_MODELS_CHECKPOINTS_DIR = TRAINED_MODELS_DIR / "checkpoints"
+TRAINED_MODELS_CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+
+TRAINED_MODELS_BACKUP_DIR = TRAINED_MODELS_DIR / "backups"
+TRAINED_MODELS_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+TRAINED_MODELS_TEMP_DIR = TRAINED_MODELS_DIR / "temp"
+TRAINED_MODELS_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
 # Define o caminho absoluto para a pasta de dados de treino
 TRAIN_DATA_DIR = Path(__file__).resolve().parent.parent / "train_data"
 TRAIN_DATA_DIR.mkdir(parents=True, exist_ok=True)
