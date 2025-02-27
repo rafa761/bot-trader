@@ -38,6 +38,27 @@ class DataPreprocessor:
         self.original_stats = {}
         self.diff_stats = {}
 
+        # Lista de colunas categóricas que precisam de tratamento especial
+        self.categorical_columns = [
+            'trend_strength', 'volatility_class', 'volume_class',
+            'market_phase', 'supertrend_direction'
+        ]
+
+        # Lista de colunas booleanas que precisam de tratamento especial
+        self.boolean_columns = [
+            'rsi_divergence_bull', 'rsi_divergence_bear', 'squeeze',
+            'cloud_green', 'price_above_cloud', 'price_below_cloud',
+            'tk_cross_bull', 'tk_cross_bear', 'pivot_resistance', 'pivot_support'
+        ]
+
+        # Filtra apenas colunas existentes
+        self.categorical_columns = [col for col in self.categorical_columns if col in feature_columns]
+        self.boolean_columns = [col for col in self.boolean_columns if col in feature_columns]
+
+        # Colunas numéricas para escalar (exclui categóricas e booleanas)
+        self.numeric_columns = [col for col in feature_columns if
+                                col not in self.categorical_columns + self.boolean_columns]
+
     def fit(self, df: pd.DataFrame) -> None:
         """
         Ajusta os parâmetros do preprocessador aos dados de treinamento.
@@ -47,7 +68,16 @@ class DataPreprocessor:
         """
         logger.info(f"Ajustando preprocessador para {len(self.feature_columns)} features")
 
-        # Armazenar estatísticas originais para cada coluna
+        # Verificar colunas existentes
+        missing_cols = [col for col in self.feature_columns if col not in df.columns]
+        if missing_cols:
+            logger.warning(f"Colunas ausentes no DataFrame: {missing_cols}")
+
+        # Filtrar para considerar apenas colunas existentes
+        existing_columns = [col for col in self.feature_columns if col in df.columns]
+        existing_numeric = [col for col in self.numeric_columns if col in df.columns]
+
+        # Armazenar estatísticas originais apenas para colunas numéricas
         self.original_stats = {
             col: {
                 'mean': df[col].mean(),
@@ -57,11 +87,32 @@ class DataPreprocessor:
                 'max': df[col].max(),
                 'q1': df[col].quantile(0.25),
                 'q3': df[col].quantile(0.75)
-            } for col in self.feature_columns
+            } for col in existing_numeric
         }
 
-        # Inicializar e ajustar scalers para cada coluna
-        for col in self.feature_columns:
+        # Para colunas categóricas, apenas armazena os valores únicos
+        for col in self.categorical_columns:
+            if col in df.columns:
+                self.original_stats[col] = {
+                    'unique_values': df[col].unique().tolist()
+                }
+
+        # Para colunas booleanas, não precisa de escalonamento
+        for col in self.boolean_columns:
+            if col in df.columns:
+                self.original_stats[col] = {
+                    'is_boolean': True
+                }
+
+        # Inicializar e ajustar scalers apenas para colunas numéricas
+        for col in existing_numeric:
+            # Verificar se há NaN e removê-los temporariamente para ajustar o scaler
+            valid_data = df[[col]].dropna()
+
+            if valid_data.empty:
+                logger.warning(f"Coluna {col} contém apenas valores NaN. Não é possível ajustar o scaler.")
+                continue
+
             # Escolher o tipo de scaler baseado na configuração
             if self.scaling_method == 'standard':
                 self.scalers[col] = StandardScaler()
@@ -71,11 +122,13 @@ class DataPreprocessor:
                 self.scalers[col] = StandardScaler()  # Usando StandardScaler como padrão
 
             # Ajustar o scaler aos dados da coluna
-            self.scalers[col].fit(df[[col]])
+            self.scalers[col].fit(valid_data)
 
         # Se usar diferenciação, calcular também estatísticas do dado diferenciado
         if self.use_differential:
-            diff_df = df[self.feature_columns].diff().dropna()
+            # Filtrar apenas colunas numéricas para diferenciação
+            diff_df = df[existing_numeric].diff().dropna()
+
             self.diff_stats = {
                 col: {
                     'mean': diff_df[col].mean(),
@@ -85,7 +138,7 @@ class DataPreprocessor:
                     'max': diff_df[col].max(),
                     'q1': diff_df[col].quantile(0.25),
                     'q3': diff_df[col].quantile(0.75)
-                } for col in self.feature_columns
+                } for col in existing_numeric
             }
 
         logger.info("Preprocessador ajustado com sucesso")
@@ -102,8 +155,9 @@ class DataPreprocessor:
         """
         df_processed = df.copy()
 
-        for col in self.feature_columns:
-            if col not in df_processed.columns:
+        # Tratar apenas colunas numéricas para outliers
+        for col in self.numeric_columns:
+            if col not in df_processed.columns or col not in self.original_stats:
                 continue
 
             if self.outlier_method == 'iqr':
@@ -156,12 +210,27 @@ class DataPreprocessor:
         """
         df_norm = df.copy()
 
-        for col in self.feature_columns:
-            if col not in df_norm.columns:
+        # Normalizar apenas colunas numéricas
+        for col in self.numeric_columns:
+            if col not in df_norm.columns or col not in self.scalers:
                 continue
 
-            # Aplicar o scaler ajustado para a coluna
-            if col in self.scalers:
+            # Lidar com NaN antes de aplicar o scaler
+            nan_mask = df_norm[col].isna()
+            if nan_mask.any():
+                # Armazenar os índices com NaN
+                nan_indices = df_norm[nan_mask].index
+
+                # Substituir temporariamente os NaN pela mediana para normalização
+                df_norm.loc[nan_indices, col] = self.original_stats[col]['median']
+
+                # Aplicar o scaler
+                df_norm[col] = self.scalers[col].transform(df_norm[[col]])
+
+                # Restaurar os NaN
+                df_norm.loc[nan_indices, col] = np.nan
+            else:
+                # Aplicar o scaler normalmente se não houver NaN
                 df_norm[col] = self.scalers[col].transform(df_norm[[col]])
 
         return df_norm
@@ -189,6 +258,13 @@ class DataPreprocessor:
             return None
 
         try:
+            # Verificar quais features do modelo estão disponíveis nos dados
+            features_available = [col for col in self.feature_columns if col in df.columns]
+
+            if len(features_available) < len(self.feature_columns):
+                missing = set(self.feature_columns) - set(features_available)
+                logger.warning(f"Features ausentes: {missing}")
+
             # 1. Detectar e tratar outliers
             df_cleaned = self.detect_outliers(df)
 
@@ -196,14 +272,56 @@ class DataPreprocessor:
             df_normalized = self.normalize(df_cleaned)
 
             # 3. Extrair as últimas 'sequence_length' entradas para previsão
-            X = df_normalized[self.feature_columns].values[-sequence_length:]
+            # Preencher valores ausentes primeiro para evitar problemas
+            df_filled = df_normalized[features_available].copy()
 
-            # 4. Verificar valores NaN e substituir por zeros
+            # Preenchimento de valores ausentes
+            for col in features_available:
+                if col in self.numeric_columns:
+                    # Para numéricas, usar 0.0
+                    df_filled[col] = df_filled[col].fillna(0.0)
+                elif col in self.categorical_columns:
+                    # Para categóricas, usar um valor padrão apropriado
+                    if col == 'trend_strength':
+                        df_filled[col] = df_filled[col].fillna('Moderada')
+                    elif col == 'volatility_class':
+                        df_filled[col] = df_filled[col].fillna('Média')
+                    elif col == 'volume_class':
+                        df_filled[col] = df_filled[col].fillna('Normal')
+                    elif col == 'market_phase':
+                        df_filled[col] = df_filled[col].fillna(0.0)
+                    elif col == 'supertrend_direction':
+                        df_filled[col] = df_filled[col].fillna(1.0)
+                    else:
+                        df_filled[col] = df_filled[col].fillna('')
+                else:
+                    # Para booleanas e outras, usar 0.0
+                    df_filled[col] = df_filled[col].fillna(0.0)
+
+            # Converter strings categóricas para valores numéricos
+            # (isso é simplificado, na prática você pode precisar de one-hot encoding)
+            for col in self.categorical_columns:
+                if col in df_filled.columns and df_filled[col].dtype == 'object':
+                    # Mapear categorias únicas para valores numéricos
+                    if col == 'trend_strength':
+                        strength_map = {'Ausente': 0.0, 'Fraca': 0.25, 'Moderada': 0.5, 'Forte': 0.75, 'Extrema': 1.0}
+                        df_filled[col] = df_filled[col].map(strength_map).fillna(0.5)
+                    elif col == 'volatility_class':
+                        vol_map = {'Muito Baixa': 0.0, 'Baixa': 0.25, 'Média': 0.5, 'Alta': 0.75, 'Extrema': 1.0}
+                        df_filled[col] = df_filled[col].map(vol_map).fillna(0.5)
+                    elif col == 'volume_class':
+                        vol_map = {'Muito Baixo': 0.0, 'Baixo': 0.25, 'Normal': 0.5, 'Alto': 0.75, 'Muito Alto': 1.0}
+                        df_filled[col] = df_filled[col].map(vol_map).fillna(0.5)
+
+            # Extrair as últimas 'sequence_length' entradas
+            X = df_filled.values[-sequence_length:]
+
+            # 5. Verificar valores NaN e substituir por zeros, se houver algum restante
             if np.isnan(X).any():
                 logger.warning("Valores NaN detectados na sequência. Substituindo por zeros.")
                 X = np.nan_to_num(X, nan=0.0)
 
-            # 5. Reformatar para o formato que o LSTM espera [samples, time steps, features]
+            # 6. Reformatar para o formato que o LSTM espera [samples, time steps, features]
             X_seq = np.array([X])
 
             return X_seq
