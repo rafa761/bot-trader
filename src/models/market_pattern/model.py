@@ -1,133 +1,120 @@
-# models\lstm\model.py
+# models/market_pattern/model.py
 
 from pathlib import Path
 
 import numpy as np
-from keras.api.layers import BatchNormalization
+import tensorflow as tf
 from keras.api.layers import Input, LSTM, Dense, Dropout
 from keras.api.models import Model, load_model
-from keras.api.optimizers import Adam
-from keras.api.regularizers import L2
 
 from core.constants import FEATURE_COLUMNS
 from core.logger import logger
 from models.base.model import BaseModel
-from models.lstm.schemas import LSTMConfig
+from models.market_pattern.schemas import MarketPatternConfig
 
 
-class LSTMModel(BaseModel):
+class MarketPatternClassifier(BaseModel):
     """
-    Modelo LSTM para previsão de séries temporais financeiras.
+    Classificador de padrões de mercado usando LSTM.
 
     Implementa um modelo de rede neural com arquitetura LSTM (Long Short-Term Memory)
-    para previsão de valores futuros com base em sequências de dados históricos.
+    para classificação de diferentes regimes de mercado (tendência alta, tendência baixa,
+    lateralização, alta volatilidade).
     """
 
-    def __init__(self, config: LSTMConfig):
+    def __init__(self, config: MarketPatternConfig):
         """
-        Inicializa o modelo LSTM com a configuração especificada.
+        Inicializa o classificador de padrões de mercado com a configuração especificada.
 
         Args:
             config: Configuração do modelo contendo parâmetros como sequence_length,
                    lstm_units, etc.
         """
         super().__init__(config)
-        self.config = config
+        self.config = config  # Garantindo que config seja do tipo MarketPatternConfig
         self.n_features = len(FEATURE_COLUMNS)
-        logger.info(f"Modelo LSTM inicializado com {self.n_features} features")
+        logger.info(f"Modelo de classificação de padrões inicializado com {self.n_features} features")
         self.model = None
         self.build_model()
 
     def build_model(self):
         """
-        Constrói a arquitetura do modelo LSTM com base na configuração.
-        Versão otimizada para hardware de alto desempenho.
+        Constrói a arquitetura do modelo de classificação de padrões de mercado.
+
+        Cria uma rede neural com camadas LSTM seguidas por camadas densas,
+        com saída softmax para classificação multiclasse.
+
+        Raises:
+            Exception: Se ocorrer algum erro durante a construção do modelo.
         """
-        logger.info("Construindo arquitetura do modelo LSTM...")
+        logger.info("Construindo arquitetura do modelo classificador de padrões...")
         try:
-            # Definir input layer
+            # Definir input layer com nome para facilitar debugging
             inputs = Input(shape=(self.config.sequence_length, self.n_features), name="input_layer")
 
-            # Normalização de batch para estabilizar o treinamento
-            x = BatchNormalization(name="batch_norm_input")(inputs)
-
             # Primeira camada LSTM
-            is_single_lstm_layer = len(self.config.lstm_units) == 1
             x = LSTM(
                 units=self.config.lstm_units[0],
-                return_sequences=not is_single_lstm_layer,
+                return_sequences=len(self.config.lstm_units) > 1,
                 name="lstm",
-                activation='tanh',
-                recurrent_activation='sigmoid',
-                recurrent_dropout=self.config.recurrent_dropout_rate,
-                kernel_regularizer=L2(self.config.l2_regularization),
-                recurrent_regularizer=L2(self.config.l2_regularization / 2),
-                unroll=False
-            )(x)
+                unroll=True
+            )(inputs)
             x = Dropout(self.config.dropout_rate, name="dropout")(x)
 
-            # Camadas LSTM intermediárias
+            # Camadas LSTM intermediárias, se houver
             for i, units in enumerate(self.config.lstm_units[1:], 1):
                 return_sequences = i < len(self.config.lstm_units) - 1
                 x = LSTM(
                     units=units,
                     return_sequences=return_sequences,
                     name=f"lstm_{i}",
-                    activation='tanh',
-                    recurrent_activation='sigmoid',
-                    recurrent_dropout=self.config.recurrent_dropout_rate,
-                    kernel_regularizer=L2(self.config.l2_regularization),
-                    recurrent_regularizer=L2(self.config.l2_regularization / 2),
-                    unroll=False
+                    unroll=True
                 )(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i}")(x)
 
-            # Camadas densas expandidas
+            # Camadas densas
             for i, units in enumerate(self.config.dense_units):
-                x = Dense(
-                    units=units,
-                    activation='relu',
-                    name=f"dense_{i}",
-                    kernel_regularizer=L2(self.config.l2_regularization)
-                )(x)
-                x = BatchNormalization(name=f"batch_norm_dense_{i}")(x)
+                x = Dense(units=units, activation='relu', name=f"dense_{i}")(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i + len(self.config.lstm_units)}")(x)
 
-            # Camada de saída - sem ativação linear
-            outputs = Dense(units=1, activation='linear', name="output")(x)
+            # Camada de saída com softmax para classificação multiclasse
+            outputs = Dense(
+                units=self.config.num_classes,
+                activation='softmax',
+                name="output"
+            )(x)
 
             # Criar modelo
             self.model = Model(inputs=inputs, outputs=outputs)
 
-            # Compilar modelo com otimizador avançado
-            optimizer = Adam(
-                learning_rate=self.config.learning_rate,
-                amsgrad=self.config.use_amsgrad
-            )
-
+            # Compilar modelo
             self.model.compile(
-                optimizer=optimizer,
-                loss='mse',
-                metrics=['mae', 'mse']
+                optimizer=tf.keras.optimizers.Adam(learning_rate=self.config.learning_rate),
+                loss='categorical_crossentropy',
+                metrics=['accuracy']
             )
 
-            logger.info("Modelo LSTM construído com sucesso")
+            logger.info("Modelo classificador de padrões construído com sucesso")
             logger.info(f"Sumário do modelo:\n{self.model.summary()}")
+            logger.info(f"Forma de entrada esperada: {self.model.input_shape}")
+            logger.info(f"Forma de saída esperada: {self.model.output_shape}")
 
         except Exception as e:
-            logger.error(f"Erro ao construir modelo LSTM: {e}")
+            logger.error(f"Erro ao construir modelo classificador de padrões: {e}")
             raise
 
     def predict(self, input_data):
         """
-        Realiza previsões com o modelo treinado.
+        Realiza previsões de classificação com o modelo treinado.
 
         Args:
             input_data: numpy array com shape (n_samples, sequence_length, n_features)
                         contendo os dados de entrada para previsão.
 
         Returns:
-            numpy array com as previsões realizadas pelo modelo.
+            tuple: (classe prevista, probabilidades)
+                - classe prevista: string com o nome da classe (ex: "UPTREND")
+                - probabilidades: numpy array com as probabilidades de cada classe
 
         Raises:
             ValueError: Se o modelo ainda não foi treinado.
@@ -137,21 +124,6 @@ class LSTMModel(BaseModel):
             raise ValueError("Modelo não foi treinado ainda")
 
         try:
-            if input_data is None or len(input_data) == 0:
-                raise ValueError("Dados de entrada vazios")
-
-            # Verificar se o formato é o correto
-            if len(input_data.shape) != 3:
-                raise ValueError(f"Formato de entrada inválido. Esperado 3D, recebido: {input_data.shape}")
-
-            # Verificar valores anormais
-            if np.isnan(input_data).any():
-                logger.warning("Valores NaN detectados nos dados de entrada!")
-                input_data = np.nan_to_num(input_data, nan=0.0)
-
-            logger.debug(
-                f"Estatísticas do input: min={np.min(input_data)}, max={np.max(input_data)}, mean={np.mean(input_data)}")
-
             # Verificar se o input_data tem a forma correta
             expected_shape = self.model.input_shape
             if input_data.shape[1:] != expected_shape[1:]:
@@ -168,14 +140,16 @@ class LSTMModel(BaseModel):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {input_data.shape[2]}"
                     )
 
-            # Usar batch_size=1 para evitar problemas com previsões em lote
-            predictions = self.model.predict(input_data, batch_size=1, verbose=1)
+            # Fazer previsão
+            probabilities = self.model.predict(input_data, batch_size=self.config.batch_size)
 
-            logger.debug(f"Previsões geradas: {predictions}")
+            # Obter a classe com maior probabilidade
+            class_idx = np.argmax(probabilities, axis=1)[0]
+            predicted_class = self.config.class_names[class_idx]
 
-            return predictions
+            return predicted_class, probabilities[0]
         except Exception as e:
-            logger.error(f"Erro ao fazer previsões: {e}")
+            logger.error(f"Erro ao fazer previsões de padrões de mercado: {e}")
             raise
 
     def save(self, path: Path):
@@ -189,17 +163,18 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o salvamento.
         """
         try:
+            # Garantir que o diretório exista
             path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Salvar o modelo
             self.model.save(path)
-
-            logger.info(f"Modelo salvo em {path}")
+            logger.info(f"Modelo classificador de padrões salvo em {path}")
         except Exception as e:
-            logger.error(f"Erro ao salvar modelo: {e}")
+            logger.error(f"Erro ao salvar modelo classificador: {e}")
             raise
 
     @classmethod
-    def load(cls, path: Path, config: LSTMConfig = None):
+    def load(cls, path: Path, config: MarketPatternConfig = None):
         """
         Carrega o modelo do disco.
 
@@ -215,12 +190,16 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o carregamento.
         """
         try:
+            # Carregar o modelo
             loaded_model = load_model(path)
-            logger.info(f"Modelo carregado de {path}")
+            logger.info(f"Modelo classificador de padrões carregado de {path}")
 
             # Criar nova instância com configuração fornecida ou padrão
             if config is None:
-                config = LSTMConfig(model_name="loaded_model")
+                config = MarketPatternConfig(
+                    model_name="loaded_market_pattern_classifier",
+                    num_classes=loaded_model.output_shape[-1]
+                )
 
             instance = cls(config)
             instance.model = loaded_model
@@ -231,5 +210,5 @@ class LSTMModel(BaseModel):
 
             return instance
         except Exception as e:
-            logger.error(f"Erro ao carregar modelo: {e}")
+            logger.error(f"Erro ao carregar modelo classificador: {e}")
             raise
