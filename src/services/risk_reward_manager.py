@@ -41,11 +41,11 @@ class RiskRewardManager:
             return 1.0
 
         # Cálculo percentual baseado em ATR
-        sl_pct = (atr_value / current_price) * 100 * self.atr_multiplier
+        sl_pct = (atr_value / current_price) * 100 * self.atr_multiplier * 0.5
 
         # Limites de segurança para o stop loss
         min_sl = 0.5  # Mínimo de 0.5%
-        max_sl = 3.0  # Máximo de 3%
+        max_sl = 1.5  # Máximo de 1.5%
 
         sl_pct = max(min_sl, min(sl_pct, max_sl))
 

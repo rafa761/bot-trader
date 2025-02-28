@@ -307,6 +307,34 @@ class LSTMSignalGenerator(SignalGenerator):
             if X_seq is None:
                 return None
 
+            # Logs detalhados para diagnóstico de condições de mercado
+            try:
+                # Obter valores relevantes dos indicadores técnicos do último candle
+                rsi_value = df['rsi'].iloc[-1] if 'rsi' in df.columns else None
+                macd_value = df['macd'].iloc[-1] if 'macd' in df.columns else None
+                macd_signal = df['macd_signal'].iloc[-1] if 'macd_signal' in df.columns else None
+                atr_pct = (df['atr'].iloc[-1] / current_price * 100) if 'atr' in df.columns else None
+
+                # Determinar tendência atual
+                trend = "NEUTRO"
+                if 'ema_short' in df.columns and 'ema_long' in df.columns:
+                    ema_short = df['ema_short'].iloc[-1]
+                    ema_long = df['ema_long'].iloc[-1]
+                    if ema_short > ema_long:
+                        trend = "ALTA"
+                    elif ema_short < ema_long:
+                        trend = "BAIXA"
+
+                # Log das condições de mercado
+                logger.info(
+                    f"Condições de mercado: Tendência={trend}, "
+                    f"RSI={rsi_value:.2f if rsi_value is not None else 'N/A'}, "
+                    f"MACD={macd_value:.6f if macd_value is not None else 'N/A'}, "
+                    f"ATR%={atr_pct:.2f if atr_pct is not None else 'N/A'}%"
+                )
+            except Exception as e:
+                logger.error(f"Erro ao registrar condições de mercado: {e}")
+
             # Previsões com LSTM
             predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
             predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
@@ -342,12 +370,26 @@ class LSTMSignalGenerator(SignalGenerator):
                 predicted_sl_pct = 10.0
 
             # Ajustar SL dinamicamente se for muito pequeno (< 0.5%)
-            if predicted_sl_pct < 0.5:
+            if predicted_sl_pct < 0.5:  # Verificar se o SL é muito pequeno
+                # Captura o R:R original antes de qualquer ajuste
+                original_tp_sign = 1 if predicted_tp_pct > 0 else -1  # Preserva o sinal do TP
+                original_rr = abs(predicted_tp_pct / predicted_sl_pct) if predicted_sl_pct > 0 else 0
+
                 atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-                if atr_value:
+                if atr_value and original_rr > 0:
+                    # Calcular o SL dinâmico baseado em ATR
                     dynamic_sl = self.strategy.risk_reward_manager.calculate_dynamic_sl(current_price, atr_value)
+
+                    # Ajustar o TP proporcionalmente para manter o mesmo R:R
+                    adjusted_tp = dynamic_sl * original_rr * original_tp_sign  # Mantém o sinal original
+
+                    # Logs para depuração
                     logger.info(f"Ajustando SL: {predicted_sl_pct:.2f}% -> {dynamic_sl:.2f}% (baseado em ATR)")
+                    logger.info(f"Ajustando TP proporcionalmente: {predicted_tp_pct:.2f}% -> {adjusted_tp:.2f}%")
+
+                    # Atualizar os valores
                     predicted_sl_pct = dynamic_sl
+                    predicted_tp_pct = adjusted_tp
                 else:
                     # Mínimo de 0.5% se não tiver ATR
                     predicted_sl_pct = 0.5
