@@ -1177,21 +1177,80 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 9. Ajustar fatores de TP/SL baseado na tendência
-                signal.tp_factor *= tp_adjustment
-                signal.sl_factor *= sl_adjustment
+                # 9. Ajustar os percentuais de TP/SL baseado na tendência e recalcular os preços
+                if signal.direction == "LONG":
+                    # Para LONG: ajuste de TP é sobre o percentual (mantém o preço acima do atual)
+                    new_tp_pct = abs(signal.predicted_tp_pct) * tp_adjustment
+                    # Para LONG: ajuste de SL é sobre o percentual (mantém o preço abaixo do atual)
+                    new_sl_pct = abs(signal.predicted_sl_pct) * sl_adjustment
+
+                    # Recalcula os fatores
+                    tp_factor = 1 + (new_tp_pct / 100)
+                    sl_factor = 1 - (new_sl_pct / 100)
+
+                    # Atualiza o sinal
+                    signal.tp_factor = tp_factor
+                    signal.sl_factor = sl_factor
+                    signal.predicted_tp_pct = new_tp_pct
+                    signal.predicted_sl_pct = new_sl_pct
+                else:  # SHORT
+                    # Para SHORT: ajuste de TP é sobre o percentual (mantém o preço abaixo do atual)
+                    new_tp_pct = abs(signal.predicted_tp_pct) * tp_adjustment
+                    # Para SHORT: ajuste de SL é sobre o percentual (mantém o preço acima do atual)
+                    new_sl_pct = abs(signal.predicted_sl_pct) * sl_adjustment
+
+                    # Recalcula os fatores
+                    tp_factor = 1 - (new_tp_pct / 100)
+                    sl_factor = 1 + (new_sl_pct / 100)
+
+                    # Atualiza o sinal
+                    signal.tp_factor = tp_factor
+                    signal.sl_factor = sl_factor
+                    signal.predicted_tp_pct = -new_tp_pct  # Negativo para SHORT
+                    signal.predicted_sl_pct = new_sl_pct
+
+                # Recalcular os preços de TP e SL
                 signal.tp_price = signal.current_price * signal.tp_factor
                 signal.sl_price = signal.current_price * signal.sl_factor
 
-                # Atualizar a razão R:R após ajustes
-                new_tp_pct = (signal.tp_price / signal.current_price - 1) * 100
-                new_sl_pct = (1 - signal.sl_price / signal.current_price) * 100 if signal.direction == "LONG" else \
-                    (signal.sl_price / signal.current_price - 1) * 100
+                # Verificar se os preços de TP e SL são lógicos
+                if signal.direction == "LONG":
+                    # Para LONG: TP deve ser maior que o preço atual, SL deve ser menor
+                    if signal.tp_price <= signal.current_price:
+                        logger.warning(
+                            f"TP inválido para LONG: {signal.tp_price} <= {signal.current_price}. Ajustando.")
+                        signal.tp_price = signal.current_price * 1.02  # Ajuste mínimo de 2%
+                        signal.predicted_tp_pct = 2.0
 
-                # Atualizar signal com novos valores percentuais
-                signal.predicted_tp_pct = new_tp_pct if signal.direction == "LONG" else -new_tp_pct
-                signal.predicted_sl_pct = abs(new_sl_pct)
+                    if signal.sl_price >= signal.current_price:
+                        logger.warning(
+                            f"SL inválido para LONG: {signal.sl_price} >= {signal.current_price}. Ajustando.")
+                        signal.sl_price = signal.current_price * 0.995  # Ajuste mínimo de 0.5%
+                        signal.predicted_sl_pct = 0.5
+                else:  # SHORT
+                    # Para SHORT: TP deve ser menor que o preço atual, SL deve ser maior
+                    if signal.tp_price >= signal.current_price:
+                        logger.warning(
+                            f"TP inválido para SHORT: {signal.tp_price} >= {signal.current_price}. Ajustando.")
+                        signal.tp_price = signal.current_price * 0.98  # Ajuste mínimo de 2%
+                        signal.predicted_tp_pct = -2.0
+
+                    if signal.sl_price <= signal.current_price:
+                        logger.warning(
+                            f"SL inválido para SHORT: {signal.sl_price} <= {signal.current_price}. Ajustando.")
+                        signal.sl_price = signal.current_price * 1.005  # Ajuste mínimo de 0.5%
+                        signal.predicted_sl_pct = 0.5
+
+                # Atualizar a razão R:R após todos os ajustes
                 signal.rr_ratio = abs(signal.predicted_tp_pct / signal.predicted_sl_pct)
+
+                # Log de debug para garantir que os preços estão corretos
+                logger.info(
+                    f"Preços ajustados: Atual={signal.current_price:.2f}, "
+                    f"TP={signal.tp_price:.2f} ({signal.predicted_tp_pct:.2f}%), "
+                    f"SL={signal.sl_price:.2f} ({signal.predicted_sl_pct:.2f}%), "
+                    f"R:R={signal.rr_ratio:.2f}"
+                )
 
                 logger.info(
                     f"Parâmetros ajustados: TP={signal.predicted_tp_pct:.2f}%, "
@@ -1233,8 +1292,8 @@ class TradingBot:
         """
         # Valores padrão
         entry_threshold = self.default_entry_threshold
-        tp_adjustment = self.default_tp_adjustment
-        sl_adjustment = self.default_sl_adjustment
+        tp_adjustment = 1.0  # Valor neutro, sem ajuste
+        sl_adjustment = 1.0  # Valor neutro, sem ajuste
 
         # Verificar se a tendência é forte
         is_strong_trend = trend_strength == "STRONG_TREND"
@@ -1245,17 +1304,17 @@ class TradingBot:
                 # Trade a favor da tendência de alta
                 entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
                 if is_strong_trend:
-                    # Em tendência forte, podemos ser mais agressivos com TP
-                    tp_adjustment = 1.2
-                    sl_adjustment = 0.9
+                    # Em tendência forte, podemos ser mais agressivos com TP (aumentar) e menos com SL (reduzir)
+                    tp_adjustment = 1.2  # Aumenta TP em 20%
+                    sl_adjustment = 0.9  # Reduz SL em 10%
                 logger.info(f"LONG alinhado com tendência de ALTA: menos seletivo, TP mais agressivo")
             else:  # SHORT
                 # Trade contra a tendência de alta
                 entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
                 if is_strong_trend:
                     # Em tendência forte de alta, ser mais conservador com trades SHORT
-                    tp_adjustment = 0.8
-                    sl_adjustment = 0.7
+                    tp_adjustment = 0.8  # Reduz TP em 20% (mais conservador)
+                    sl_adjustment = 0.7  # Reduz SL em 30% (mais próximo, protege mais)
                 logger.info(f"SHORT contra tendência de ALTA: mais seletivo, alvos reduzidos")
 
         elif trend_direction == "DOWNTREND":
@@ -1263,17 +1322,17 @@ class TradingBot:
                 # Trade a favor da tendência de baixa
                 entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
                 if is_strong_trend:
-                    # Em tendência forte, podemos ser mais agressivos com TP
-                    tp_adjustment = 1.2
-                    sl_adjustment = 0.9
+                    # Em tendência forte, podemos ser mais agressivos com TP e menos com SL
+                    tp_adjustment = 1.2  # Aumenta TP em 20%
+                    sl_adjustment = 0.9  # Reduz SL em 10%
                 logger.info(f"SHORT alinhado com tendência de BAIXA: menos seletivo, TP mais agressivo")
             else:  # LONG
                 # Trade contra a tendência de baixa
                 entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
                 if is_strong_trend:
                     # Em tendência forte de baixa, ser mais conservador com trades LONG
-                    tp_adjustment = 0.8
-                    sl_adjustment = 0.7
+                    tp_adjustment = 0.8  # Reduz TP em 20% (mais conservador)
+                    sl_adjustment = 0.7  # Reduz SL em 30% (mais próximo, protege mais)
                 logger.info(f"LONG contra tendência de BAIXA: mais seletivo, alvos reduzidos")
 
         else:  # NEUTRAL
