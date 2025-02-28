@@ -14,7 +14,7 @@ from core.logger import logger
 from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
 from models.lstm.trainer import LSTMTrainer
-from models.managers.model_manager import ModelManager
+from models.managers.optuna_model_manager import OptunaModelManager
 from repositories.data_handler import LabelCreator
 from repositories.data_preprocessor import DataPreprocessor
 
@@ -264,31 +264,61 @@ class ModelRetrainer:
             base_weights = base_model.model.get_weights()
             new_weights = new_model.model.get_weights()
 
+            # Se a arquitetura mudou completamente (número diferente de camadas)
             if len(base_weights) != len(new_weights):
                 logger.warning(
-                    f"Incompatibilidade na estrutura dos modelos. "
-                    f"Base: {len(base_weights)} camadas, Novo: {len(new_weights)} camadas"
+                    f"Arquiteturas incompatíveis: base tem {len(base_weights)} camadas, novo tem {len(new_weights)} camadas. "
+                    f"Optuna pode ter alterado significativamente a arquitetura. Usando apenas o novo modelo."
                 )
+                # Transfer learning não é possível, mas continuamos com o novo modelo
                 return False
 
             # Verificar forma dos tensores de pesos para cada camada
-            compatible = True
+            layers_to_transfer = []
             for i, (base_w, new_w) in enumerate(zip(base_weights, new_weights)):
-                if base_w.shape != new_w.shape:
-                    logger.warning(
-                        f"Incompatibilidade na camada {i}: "
-                        f"Base: {base_w.shape}, Novo: {new_w.shape}"
-                    )
-                    compatible = False
-                    break
+                if base_w.shape == new_w.shape:
+                    layers_to_transfer.append((i, True))  # (índice, transferir completo)
+                else:
+                    # Verificar se é possível fazer transferência parcial
+                    # Por exemplo, se apenas o número de unidades mudou
+                    if len(base_w.shape) == len(new_w.shape):
+                        # Tensores com mesma dimensionalidade, mas shapes diferentes
+                        # Podemos transferir parcialmente para as dimensões sobrepostas
+                        layers_to_transfer.append((i, False))  # (índice, transferir parcial)
+                        logger.info(
+                            f"Transferência parcial para camada {i}: base={base_w.shape}, novo={new_w.shape}"
+                        )
+                    else:
+                        logger.warning(f"Camada {i} incompatível: ignorando transferência")
 
-            if not compatible:
-                logger.warning("Arquiteturas incompatíveis. Transfer learning não aplicado.")
+            if not layers_to_transfer:
+                logger.warning("Nenhuma camada compatível para transferência. Usando apenas o novo modelo.")
                 return False
 
-            # Aplicar pesos do modelo base ao novo modelo
-            logger.info("Transferindo pesos do modelo base para o novo modelo...")
-            new_model.model.set_weights(base_weights)
+            # Aplicar transferência de pesos onde possível
+            new_model_weights = new_model.model.get_weights()
+
+            for layer_idx, full_transfer in layers_to_transfer:
+                if full_transfer:
+                    # Transferência completa
+                    new_model_weights[layer_idx] = base_weights[layer_idx]
+                else:
+                    # Transferência parcial - apenas as dimensões que se sobrepõem
+                    base_shape = base_weights[layer_idx].shape
+                    new_shape = new_model_weights[layer_idx].shape
+
+                    # Determinar o tamanho máximo que podemos transferir
+                    transfer_shape = tuple(min(b, n) for b, n in zip(base_shape, new_shape))
+
+                    # Criar seletores para cada dimensão
+                    selectors = tuple(slice(0, dim) for dim in transfer_shape)
+
+                    # Transferir os pesos sobrepostos
+                    new_model_weights[layer_idx][selectors] = base_weights[layer_idx][selectors]
+
+            # Aplicar os pesos atualizados
+            new_model.model.set_weights(new_model_weights)
+            logger.info(f"Transfer learning aplicado para {len(layers_to_transfer)} camadas")
 
             # Congelamento seletivo de camadas com base na fase de treinamento
             if training_phase == "initial":
@@ -425,7 +455,7 @@ class ModelRetrainer:
                 trainer = LSTMTrainer(model, training_config)
 
                 # Criar gerenciador para executar pipeline de treinamento
-                manager = ModelManager(model, trainer, retraining_config)
+                manager = OptunaModelManager(model, trainer, retraining_config)
 
                 # Inicializar novo modelo com pesos do anterior (transfer learning)
                 try:
@@ -519,6 +549,21 @@ class ModelRetrainer:
         version_parts = base_config.version.split('.')
         new_version = f"{version_parts[0]}.{version_parts[1]}.{int(version_parts[2]) + 1}"
 
+        # Verificar se existe configuração de Optuna anterior
+        optuna_config = None
+        if hasattr(base_config, 'optuna_config'):
+            # Configuração Optuna ajustada para retreinamento mais rápido
+            from models.lstm.schemas import OptunaConfig
+            optuna_config = OptunaConfig(
+                enabled=True,  # Manter habilitado para explorar novos hiperparâmetros
+                n_trials=10,  # Menos trials para retreinamento incremental
+                timeout=1800,  # Limite de 30 minutos para economizar tempo
+                study_name=f"{base_config.model_name}_retraining_study",
+                storage=None,  # Armazenamento em memória para simplicidade
+                direction="minimize",
+                metric="val_loss"
+            )
+
         # Configuração otimizada para retreinamento mais rápido
         retraining_config = LSTMConfig(
             model_name=base_config.model_name,
@@ -528,9 +573,14 @@ class ModelRetrainer:
             lstm_units=base_config.lstm_units,
             dense_units=base_config.dense_units,
             dropout_rate=base_config.dropout_rate,
+            recurrent_dropout_rate=base_config.recurrent_dropout_rate if hasattr(base_config,
+                                                                                 'recurrent_dropout_rate') else 0.1,
+            l2_regularization=base_config.l2_regularization if hasattr(base_config, 'l2_regularization') else 0.0001,
             learning_rate=base_config.learning_rate * 0.8,  # Taxa de aprendizagem reduzida
             batch_size=base_config.batch_size * 2,  # Batch maior para retreinamento mais rápido
-            epochs=25  # Menos épocas para retreinamento incremental
+            epochs=25,  # Menos épocas para retreinamento incremental
+            use_amsgrad=base_config.use_amsgrad if hasattr(base_config, 'use_amsgrad') else True,
+            optuna_config=optuna_config  # Adicionar configuração do Optuna
         )
 
         return retraining_config

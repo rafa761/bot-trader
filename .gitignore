@@ -405,6 +405,7 @@ megalinter-reports/
 /docs/bruno-api-client/Pricing/environments/Produção (CUIDADO).bru
 
 /src/train_data/
+/data/
 
 # Ignorar todos os arquivos na pasta trained_models
 /src/trained_models/*

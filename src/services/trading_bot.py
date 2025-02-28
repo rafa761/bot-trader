@@ -7,14 +7,12 @@ import numpy as np
 import pandas as pd
 
 from core.config import settings
-from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
+from core.constants import FEATURE_COLUMNS
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from repositories.data_handler import DataHandler
 from repositories.data_preprocessor import DataPreprocessor
 from services.base.schemas import (
-    MarketPatternResult,
-    TradingParameters,
     TradingSignal,
     OrderResult,
     TPSLResult
@@ -22,12 +20,12 @@ from services.base.schemas import (
 from services.base.services import (
     MarketDataProvider,
     SignalGenerator,
-    OrderExecutor,
-    MarketPatternAnalyzer,
-    ParameterAdjuster
+    OrderExecutor
 )
 from services.binance_client import BinanceClient
+from services.cleanup_handler import CleanupHandler
 from services.model_retrainer import ModelRetrainer
+from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import TrendAnalyzer
 
@@ -455,6 +453,10 @@ class LSTMSignalGenerator(SignalGenerator):
             # Obter ATR para ajustes de quantidade
             atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
 
+            # Determinar tendência e força
+            market_trend = TrendAnalyzer.ema_trend(df)
+            market_strength = TrendAnalyzer.adx_trend(df)
+
             signal = TradingSignal(
                 id=signal_id,
                 direction=direction,
@@ -470,6 +472,8 @@ class LSTMSignalGenerator(SignalGenerator):
                 atr_value=atr_value,
                 entry_score=entry_score,
                 rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+                market_trend=market_trend,
+                market_strength=market_strength,
                 timestamp=datetime.datetime.now()
             )
 
@@ -486,11 +490,13 @@ class BinanceOrderExecutor(OrderExecutor):
             self,
             binance_client: BinanceClient,
             strategy: TradingStrategy,
+            performance_monitor: TradePerformanceMonitor | None = None,
             tick_size: float = 0.0,
             step_size: float = 0.0
     ):
         self.client = binance_client
         self.strategy = strategy
+        self.performance_monitor = performance_monitor
         self.tick_size = tick_size
         self.step_size = step_size
 
@@ -596,7 +602,7 @@ class BinanceOrderExecutor(OrderExecutor):
                 logger.warning("Qty ajustada <= 0. Trade abortado.")
                 return OrderResult(success=False, error_message="Quantidade ajustada <= 0")
 
-            # Verificar valor notional mínimo da Binance (IMPORTANTE: código estava indentado incorretamente)
+            # Verificar valor notional mínimo da Binance
             notional_value = qty_adj * signal.current_price
 
             if notional_value < min_notional:
@@ -658,6 +664,39 @@ class BinanceOrderExecutor(OrderExecutor):
                 if len(self.executed_orders) > self.max_order_history:
                     self.executed_orders.pop(0)
 
+            # Registrar o trade no monitor de performance (usando self.performance_monitor diretamente)
+            if self.performance_monitor is not None:
+                try:
+                    # Garantir que temos todos os dados necessários
+                    market_trend = getattr(signal, 'market_trend', None)
+                    market_strength = getattr(signal, 'market_strength', None)
+
+                    # Calcular volatilidade
+                    volatility = None
+                    if signal.atr_value:
+                        volatility = (signal.atr_value / signal.current_price) * 100
+
+                    self.performance_monitor.register_trade_from_signal(
+                        signal_id=signal.id,
+                        direction=signal.direction,
+                        entry_price=signal.current_price,
+                        quantity=qty_adj,
+                        tp_target_price=signal.tp_price,
+                        sl_target_price=signal.sl_price,
+                        predicted_tp_pct=signal.predicted_tp_pct,
+                        predicted_sl_pct=signal.predicted_sl_pct,
+                        market_trend=market_trend,
+                        market_volatility=volatility,
+                        market_strength=market_strength,
+                        entry_score=signal.entry_score if hasattr(signal, 'entry_score') else None,
+                        rr_ratio=signal.rr_ratio if hasattr(signal, 'rr_ratio') else None,
+                        leverage=settings.LEVERAGE,
+                        trade_id=str(order_resp.get("orderId"))
+                    )
+                    logger.info(f"Trade {signal.id} registrado no monitor de performance")
+                except Exception as e:
+                    logger.error(f"Erro ao registrar trade no monitor de performance: {e}")
+
                 # Coloca as ordens de TP e SL
                 tp_sl_result = await self.place_tp_sl(
                     signal.direction,
@@ -679,122 +718,7 @@ class BinanceOrderExecutor(OrderExecutor):
             return OrderResult(success=False, error_message=error_msg)
 
 
-class ModelBasedPatternAnalyzer(MarketPatternAnalyzer):
-    """Analisador de padrões de mercado baseado em modelos."""
-
-    def __init__(self, pattern_classifier, sequence_length: int = 16):
-        self.pattern_classifier = pattern_classifier
-        self.sequence_length = sequence_length
-
-    def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """Prepara uma sequência para o classificador de padrões."""
-        # Verifica se todos os FEATURE_COLUMNS existem no DataFrame
-        missing_columns = [col for col in FEATURE_COLUMNS if col not in df.columns]
-        if missing_columns:
-            logger.warning(f"Colunas ausentes no DataFrame: {missing_columns}")
-            return None
-
-        # Verifica se há dados suficientes
-        if len(df) < self.sequence_length:
-            logger.warning(
-                f"Dados insuficientes para classificação. Necessário: {self.sequence_length}, "
-                f"Disponível: {len(df)}"
-            )
-            return None
-
-        try:
-            # Pegar as últimas 'sequence_length' entradas
-            last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
-
-            # Reformatar para o formato esperado [samples, time steps, features]
-            x_pred = np.array([last_sequence])
-
-            return x_pred
-        except Exception as e:
-            logger.error(f"Erro ao preparar sequência para classificação: {e}", exc_info=True)
-            return None
-
-    def analyze_pattern(self, df: pd.DataFrame) -> MarketPatternResult:
-        """Analisa e identifica o padrão atual do mercado."""
-        if self.pattern_classifier is None:
-            logger.warning("Classificador de padrões não carregado. Retornando padrão neutro.")
-            return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-        try:
-            # Preparar sequência para previsão
-            X_seq = self._prepare_sequence(df)
-            if X_seq is None:
-                return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-            # Fazer previsão
-            pattern, probabilities = self.pattern_classifier.predict(X_seq)
-            confidence = float(np.max(probabilities))
-
-            logger.info(f"Padrão de mercado detectado: {pattern} (confiança: {confidence:.2f})")
-            return MarketPatternResult(pattern=pattern, confidence=confidence)
-
-        except Exception as e:
-            logger.error(f"Erro ao prever padrão de mercado: {e}", exc_info=True)
-            return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-
-class PatternBasedParameterAdjuster(ParameterAdjuster):
-    """Ajusta parâmetros de trading baseado no padrão de mercado."""
-
-    def adjust_parameters(
-            self, pattern: str, confidence: float, direction: str
-    ) -> TradingParameters:
-        """Ajusta os parâmetros de trading baseado no padrão de mercado."""
-        # Valores padrão
-        params = TradingParameters(
-            entry_threshold=settings.ENTRY_THRESHOLD_DEFAULT,
-            tp_adjustment_factor=1.0,
-            sl_adjustment_factor=1.0
-        )
-
-        # Só ajustar se a confiança for razoável
-        if confidence < 0.6:
-            return params
-
-        if pattern == "RANGE":
-            # Em mercado lateralizado, ser mais conservador
-            params.entry_threshold = settings.ENTRY_THRESHOLD_RANGE
-            # Ajustar TP/SL para valores menores
-            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_RANGE
-            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_RANGE
-            logger.info(
-                "Ajustando estratégia para mercado em RANGE: trades mais seletivos, targets menores"
-            )
-
-        elif pattern == "VOLATILE":
-            # Em mercado volátil, ser muito seletivo
-            params.entry_threshold = settings.ENTRY_THRESHOLD_VOLATILE
-            # Ampliar stops para evitar stop-outs
-            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_VOLATILE
-            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_VOLATILE
-            logger.info(
-                "Ajustando estratégia para mercado VOLÁTIL: muito seletivo, stops mais amplos"
-            )
-
-        elif pattern in ["UPTREND", "DOWNTREND"]:
-            # Em tendência definida, verificar alinhamento
-            if (direction == "LONG" and pattern == "UPTREND") or \
-                    (direction == "SHORT" and pattern == "DOWNTREND"):
-                # Trade a favor da tendência - ser mais agressivo
-                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
-                logger.info(
-                    f"Trade {direction} alinhado com tendência {pattern}: menos seletivo"
-                )
-            else:
-                # Trade contra a tendência - ser mais cauteloso
-                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
-                logger.info(
-                    f"Trade {direction} contra tendência {pattern}: mais seletivo"
-                )
-
-        return params
-
-# Classe principal refatorada
+# Classe principal refatorada, removendo a análise de padrão de mercado
 class TradingBot:
     """
     Classe principal do bot de trading, que coordena os demais componentes
@@ -810,25 +734,25 @@ class TradingBot:
             sl_model: Modelo LSTM para previsão de Stop Loss
         """
         # Instancia o cliente Binance
-        binance_client = BinanceClient()
+        self.binance_client = BinanceClient()
 
         # DataHandler
-        self.data_handler = DataHandler(binance_client)
+        self.data_handler = DataHandler(self.binance_client)
+
+        # Instanciar o monitor de performance antes da estratégia
+        self.performance_monitor = TradePerformanceMonitor()
 
         # Estratégia
         self.strategy = TradingStrategy()
 
         # Componentes do SOLID
-        self.data_provider = BinanceDataProvider(binance_client, self.data_handler)
+        self.data_provider = BinanceDataProvider(self.binance_client, self.data_handler)
         self.signal_generator = LSTMSignalGenerator(tp_model, sl_model, self.strategy)
-        self.order_executor = BinanceOrderExecutor(binance_client, self.strategy)
-
-        # Classificador de padrões
-        pattern_classifier = self._load_pattern_classifier()
-        self.pattern_analyzer = ModelBasedPatternAnalyzer(pattern_classifier)
-
-        # Ajustador de parâmetros
-        self.parameter_adjuster = PatternBasedParameterAdjuster()
+        self.order_executor = BinanceOrderExecutor(
+            self.binance_client,
+            self.strategy,
+            performance_monitor=self.performance_monitor
+        )
 
         # Sistema de retreinamento - Com referência para o signal_generator
         self.model_retrainer = ModelRetrainer(
@@ -840,6 +764,10 @@ class TradingBot:
             min_data_points=1000,  # Mínimo de 1000 pontos de dados
             performance_threshold=0.15  # Limiar de erro para retreinamento
         )
+
+        # Adicionar manipulador de limpeza para interrupções
+        self.cleanup_handler = CleanupHandler(self.binance_client, settings.SYMBOL)
+        self.cleanup_handler.register()
 
         # Controle de estado interno
         self.last_retraining_check = datetime.datetime.now()
@@ -857,6 +785,11 @@ class TradingBot:
 
         # Flag para verificação de retreinamento
         self.check_retraining_status_interval = 60  # Verificar a cada 60 ciclos
+
+        # Valores padrão para parâmetros de trading
+        self.default_entry_threshold = settings.ENTRY_THRESHOLD_DEFAULT
+        self.default_tp_adjustment = 1.0
+        self.default_sl_adjustment = 1.0
 
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
@@ -1115,8 +1048,6 @@ class TradingBot:
     async def process_completed_trades(self):
         """
         Processa trades completados para registrar valores reais de TP/SL.
-        Esta função busca informações de trades fechados diretamente da Binance
-        para alimentar o sistema de retreinamento com dados reais.
         """
         try:
             # Obter todas as ordens executadas que não foram processadas ainda
@@ -1142,101 +1073,52 @@ class TradingBot:
 
                     if trade_result:
                         result_type = trade_result["result"]
+                        exit_price = trade_result.get("exit_price")
 
-                        # Registrar os resultados com base no tipo de fechamento (TP ou SL)
+                        # Registrar no monitor de performance (se possível)
+                        if exit_price and self.performance_monitor:
+                            try:
+                                # Buscar o trade pelo signal_id
+                                trade = self.performance_monitor.get_trade_by_signal_id(signal_id)
+
+                                if trade:
+                                    # Registrar saída do trade
+                                    self.performance_monitor.register_trade_exit(
+                                        trade_id=trade.trade_id,
+                                        exit_price=exit_price,
+                                        exit_time=datetime.datetime.now()
+                                    )
+                                    logger.info(f"Saída de trade registrada no monitor: {signal_id}")
+                                else:
+                                    logger.warning(f"Trade com signal_id {signal_id} não encontrado no monitor")
+                            except Exception as e:
+                                logger.error(f"Erro ao registrar saída de trade no monitor: {e}")
+
+                        # Registrar dados para o retreinamento
                         if result_type == "TP":
                             actual_tp_pct = trade_result["actual_tp_pct"]
                             predicted_tp_pct = order.get("predicted_tp_pct", 0)
 
-                            # Registrar no histórico de trades
-                            self.trades_history.append({
-                                "signal_id": signal_id,
-                                "direction": order.get("direction"),
-                                "result": "TP",
-                                "predicted_tp_pct": predicted_tp_pct,
-                                "actual_tp_pct": actual_tp_pct,
-                                "close_time": datetime.datetime.now(),
-                                "entry_price": order.get("entry_price"),
-                                "exit_price": trade_result.get("exit_price")
-                            })
-
-                            # Registrar dados para o retreinamento
                             self.signal_generator.record_actual_values(
                                 signal_id, actual_tp_pct, 0, self.model_retrainer
                             )
-
-                            logger.info(
-                                f"Trade {signal_id} atingiu TP: previsto={predicted_tp_pct:.2f}%, real={actual_tp_pct:.2f}%")
 
                         elif result_type == "SL":
                             actual_sl_pct = trade_result["actual_sl_pct"]
                             predicted_sl_pct = order.get("predicted_sl_pct", 0)
 
-                            # Registrar no histórico de trades
-                            self.trades_history.append({
-                                "signal_id": signal_id,
-                                "direction": order.get("direction"),
-                                "result": "SL",
-                                "predicted_sl_pct": predicted_sl_pct,
-                                "actual_sl_pct": actual_sl_pct,
-                                "close_time": datetime.datetime.now(),
-                                "entry_price": order.get("entry_price"),
-                                "exit_price": trade_result.get("exit_price")
-                            })
-
-                            # Registrar dados para o retreinamento
                             self.signal_generator.record_actual_values(
                                 signal_id, 0, actual_sl_pct, self.model_retrainer
                             )
 
-                            logger.info(
-                                f"Trade {signal_id} atingiu SL: previsto={predicted_sl_pct:.2f}%, real={actual_sl_pct:.2f}%")
-
-                        # Marcar ordem como processada para não processá-la novamente
+                        # Marcar ordem como processada
                         order["processed"] = True
 
                     else:
                         logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
 
-            # Limitar tamanho do histórico
-            if len(self.trades_history) > self.max_trades_history:
-                self.trades_history = self.trades_history[-self.max_trades_history:]
-
         except Exception as e:
             logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
-
-    def _load_pattern_classifier(self):
-        """Carrega o modelo classificador de padrões de mercado."""
-        try:
-            pattern_classifier_path = TRAINED_MODELS_DIR / "market_pattern_classifier.keras"
-
-            if pattern_classifier_path.exists():
-                try:
-                    from models.market_pattern.model import MarketPatternClassifier
-                    from models.market_pattern.schemas import MarketPatternConfig
-
-                    pattern_config = MarketPatternConfig(
-                        model_name="market_pattern_classifier",
-                        num_classes=4,
-                        class_names=["UPTREND", "DOWNTREND", "RANGE", "VOLATILE"]
-                    )
-
-                    classifier = MarketPatternClassifier.load(pattern_classifier_path, pattern_config)
-                    logger.info("Classificador de padrões de mercado carregado com sucesso")
-                    return classifier
-
-                except Exception as e:
-                    logger.error(f"Erro ao carregar classificador de padrões: {e}", exc_info=True)
-                    return None
-            else:
-                logger.warning(
-                    f"Classificador de padrões não encontrado em {pattern_classifier_path}. "
-                    f"Usando análise de tendência padrão."
-                )
-                return None
-        except Exception as e:
-            logger.warning(f"Erro ao tentar carregar classificador de padrões: {e}")
-            return None
 
     async def run(self) -> None:
         """
@@ -1253,6 +1135,10 @@ class TradingBot:
                 # A cada 10 ciclos, mostra um resumo do sistema
                 if self.cycle_count % 10 == 0:
                     await self._log_system_summary()
+
+                    # Adicionar resumo de performance a cada 10 ciclos
+                    if self.cycle_count % 30 == 0:  # A cada 30 ciclos (aproximadamente a cada 2.5 minutos)
+                        self.performance_monitor.log_performance_summary()
 
                 # Periodicamente verificar o status do retreinamento
                 if self.cycle_count % self.check_retraining_status_interval == 0:
@@ -1298,12 +1184,14 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 5. Analisar padrão de mercado
-                pattern_result = self.pattern_analyzer.analyze_pattern(df)
+                # 5. Analisar tendência de mercado atual usando TrendAnalyzer
+                trend_direction = TrendAnalyzer.ema_trend(df)
+                trend_strength = TrendAnalyzer.adx_trend(df)
 
-                # 6. Ajustar parâmetros baseado no padrão
-                params = self.parameter_adjuster.adjust_parameters(
-                    pattern_result.pattern, pattern_result.confidence, signal.direction
+                # 6. Determinar parâmetros de trading baseados na tendência
+                # Substituindo a funcionalidade do MarketPatternAnalyzer e PatternBasedParameterAdjuster
+                entry_threshold, tp_adjustment, sl_adjustment = self._adjust_parameters_based_on_trend(
+                    trend_direction, trend_strength, signal.direction
                 )
 
                 # 7. Avaliar qualidade da entrada considerando parâmetros do sinal já gerado
@@ -1313,37 +1201,96 @@ class TradingBot:
                     signal.direction,
                     predicted_tp_pct=signal.predicted_tp_pct,
                     predicted_sl_pct=signal.predicted_sl_pct,
-                    entry_threshold=params.entry_threshold
+                    entry_threshold=entry_threshold
                 )
 
                 # 8. Log de análise técnica
                 self._log_technical_analysis(
-                    signal.direction, pattern_result.pattern, entry_score, params.entry_threshold
+                    signal.direction, trend_direction, entry_score, entry_threshold
                 )
 
                 if not should_enter:
                     logger.info(
                         f"Sinal {signal.direction} gerado, mas condições de mercado não favoráveis. "
-                        f"Score: {entry_score:.2f} < {params.entry_threshold:.2f}"
+                        f"Score: {entry_score:.2f} < {entry_threshold:.2f}"
                     )
                     await asyncio.sleep(5)
                     continue
 
-                # 9. Ajustar fatores de TP/SL baseado no padrão
-                signal.tp_factor *= params.tp_adjustment_factor
-                signal.sl_factor *= params.sl_adjustment_factor
+                # 9. Ajustar os percentuais de TP/SL baseado na tendência e recalcular os preços
+                if signal.direction == "LONG":
+                    # Para LONG: ajuste de TP é sobre o percentual (mantém o preço acima do atual)
+                    new_tp_pct = abs(signal.predicted_tp_pct) * tp_adjustment
+                    # Para LONG: ajuste de SL é sobre o percentual (mantém o preço abaixo do atual)
+                    new_sl_pct = abs(signal.predicted_sl_pct) * sl_adjustment
+
+                    # Recalcula os fatores
+                    tp_factor = 1 + (new_tp_pct / 100)
+                    sl_factor = 1 - (new_sl_pct / 100)
+
+                    # Atualiza o sinal
+                    signal.tp_factor = tp_factor
+                    signal.sl_factor = sl_factor
+                    signal.predicted_tp_pct = new_tp_pct
+                    signal.predicted_sl_pct = new_sl_pct
+                else:  # SHORT
+                    # Para SHORT: ajuste de TP é sobre o percentual (mantém o preço abaixo do atual)
+                    new_tp_pct = abs(signal.predicted_tp_pct) * tp_adjustment
+                    # Para SHORT: ajuste de SL é sobre o percentual (mantém o preço acima do atual)
+                    new_sl_pct = abs(signal.predicted_sl_pct) * sl_adjustment
+
+                    # Recalcula os fatores
+                    tp_factor = 1 - (new_tp_pct / 100)
+                    sl_factor = 1 + (new_sl_pct / 100)
+
+                    # Atualiza o sinal
+                    signal.tp_factor = tp_factor
+                    signal.sl_factor = sl_factor
+                    signal.predicted_tp_pct = -new_tp_pct  # Negativo para SHORT
+                    signal.predicted_sl_pct = new_sl_pct
+
+                # Recalcular os preços de TP e SL
                 signal.tp_price = signal.current_price * signal.tp_factor
                 signal.sl_price = signal.current_price * signal.sl_factor
 
-                # Atualizar a razão R:R após ajustes
-                new_tp_pct = (signal.tp_price / signal.current_price - 1) * 100
-                new_sl_pct = (1 - signal.sl_price / signal.current_price) * 100 if signal.direction == "LONG" else \
-                    (signal.sl_price / signal.current_price - 1) * 100
+                # Verificar se os preços de TP e SL são lógicos
+                if signal.direction == "LONG":
+                    # Para LONG: TP deve ser maior que o preço atual, SL deve ser menor
+                    if signal.tp_price <= signal.current_price:
+                        logger.warning(
+                            f"TP inválido para LONG: {signal.tp_price} <= {signal.current_price}. Ajustando.")
+                        signal.tp_price = signal.current_price * 1.02  # Ajuste mínimo de 2%
+                        signal.predicted_tp_pct = 2.0
 
-                # Atualizar signal com novos valores percentuais
-                signal.predicted_tp_pct = new_tp_pct if signal.direction == "LONG" else -new_tp_pct
-                signal.predicted_sl_pct = abs(new_sl_pct)
+                    if signal.sl_price >= signal.current_price:
+                        logger.warning(
+                            f"SL inválido para LONG: {signal.sl_price} >= {signal.current_price}. Ajustando.")
+                        signal.sl_price = signal.current_price * 0.995  # Ajuste mínimo de 0.5%
+                        signal.predicted_sl_pct = 0.5
+                else:  # SHORT
+                    # Para SHORT: TP deve ser menor que o preço atual, SL deve ser maior
+                    if signal.tp_price >= signal.current_price:
+                        logger.warning(
+                            f"TP inválido para SHORT: {signal.tp_price} >= {signal.current_price}. Ajustando.")
+                        signal.tp_price = signal.current_price * 0.98  # Ajuste mínimo de 2%
+                        signal.predicted_tp_pct = -2.0
+
+                    if signal.sl_price <= signal.current_price:
+                        logger.warning(
+                            f"SL inválido para SHORT: {signal.sl_price} <= {signal.current_price}. Ajustando.")
+                        signal.sl_price = signal.current_price * 1.005  # Ajuste mínimo de 0.5%
+                        signal.predicted_sl_pct = 0.5
+
+                # Atualizar a razão R:R após todos os ajustes
                 signal.rr_ratio = abs(signal.predicted_tp_pct / signal.predicted_sl_pct)
+
+                # Log de debug para garantir que os preços estão corretos
+                logger.info(
+                    f"Preços ajustados: Atual={signal.current_price:.2f}, "
+                    f"TP={signal.tp_price:.2f} ({signal.predicted_tp_pct:.2f}%), "
+                    f"SL={signal.sl_price:.2f} ({signal.predicted_sl_pct:.2f}%), "
+                    f"R:R={signal.rr_ratio:.2f}"
+                )
 
                 logger.info(
                     f"Parâmetros ajustados: TP={signal.predicted_tp_pct:.2f}%, "
@@ -1361,12 +1308,183 @@ class TradingBot:
 
                 await asyncio.sleep(5)
 
+
+        except asyncio.CancelledError:
+            logger.info("Tarefa do bot cancelada. Realizando limpeza...")
+            await self.cleanup()
+            raise
+        except KeyboardInterrupt:
+            logger.info("Interrupção do teclado detectada no método run. Realizando limpeza...")
+            await self.cleanup()
         except Exception as e:
             logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
         finally:
-            # Garantir que o cliente seja fechado corretamente
-            await self.order_executor.client.close()
-            logger.info("Conexões do bot fechadas corretamente.")
+            # Garantir que o cliente seja fechado corretamente mesmo sem execução do cleanup
+            try:
+                await self.binance_client.close()
+                logger.info("Conexões do bot fechadas corretamente.")
+            except Exception as e:
+                logger.error(f"Erro ao fechar conexões: {e}")
+
+    async def cleanup(self) -> None:
+        """
+        Limpa todas as ordens e posições abertas.
+        Este método é chamado quando o bot está sendo encerrado.
+        """
+        logger.info("Iniciando limpeza de ordens e posições...")
+        try:
+            # Verificar se o cleanup_handler está disponível
+            if hasattr(self, 'cleanup_handler') and self.cleanup_handler:
+                await self.cleanup_handler.execute_cleanup()
+            else:
+                # Fallback caso o cleanup_handler não esteja disponível
+                logger.warning("CleanupHandler não encontrado. Tentando limpeza direta...")
+
+                # Tentar inicializar o cliente Binance se ainda não estiver inicializado
+                if not self.binance_client._initialized:
+                    await self.binance_client.initialize()
+
+                # Cancelar todas as ordens abertas
+                try:
+                    result = await self.binance_client.client.futures_cancel_all_open_orders(
+                        symbol=settings.SYMBOL
+                    )
+                    logger.info(f"Ordens canceladas: {result}")
+                except Exception as e:
+                    logger.error(f"Erro ao cancelar ordens: {e}")
+
+                # Fechar todas as posições abertas
+                try:
+                    positions = await self.binance_client.client.futures_position_information(
+                        symbol=settings.SYMBOL
+                    )
+
+                    for position in positions:
+                        position_amt = float(position['positionAmt'])
+                        if position_amt == 0:
+                            continue  # Pular posições vazias
+
+                        # Determinar direção da posição e parâmetros para fechamento
+                        if position_amt > 0:  # Posição LONG
+                            side = "SELL"
+                            position_side = "LONG"
+                        else:  # Posição SHORT
+                            side = "BUY"
+                            position_side = "SHORT"
+
+                        # Quantidade absoluta (remover sinal)
+                        quantity = abs(position_amt)
+
+                        # Tentar fechar com estratégia de fallback
+                        try:
+                            # Primeira tentativa: sem reduceOnly
+                            close_order = await self.binance_client.client.futures_create_order(
+                                symbol=settings.SYMBOL,
+                                side=side,
+                                positionSide=position_side,
+                                type="MARKET",
+                                quantity=f"{quantity}"  # Sem o parâmetro reduceOnly
+                            )
+
+                            logger.info(f"Posição fechada: {position_side} {quantity} {settings.SYMBOL}")
+                        except Exception as order_error:
+                            logger.warning(f"Erro ao fechar posição: {order_error}. Tentando método alternativo...")
+
+                            # Segunda tentativa: com closePosition
+                            try:
+                                close_order = await self.binance_client.client.futures_create_order(
+                                    symbol=settings.SYMBOL,
+                                    side=side,
+                                    positionSide=position_side,
+                                    type="MARKET",
+                                    closePosition=True
+                                )
+                                logger.info(f"Posição fechada (método alternativo): {position_side} {settings.SYMBOL}")
+                            except Exception as alt_error:
+                                logger.error(f"Não foi possível fechar posição {position_side}: {alt_error}")
+                except Exception as e:
+                    logger.error(f"Erro ao fechar posições: {e}")
+
+            logger.info("Limpeza concluída.")
+        except Exception as e:
+            logger.error(f"Erro durante limpeza: {e}", exc_info=True)
+        finally:
+            # Garantir que o cliente seja fechado
+            try:
+                await self.binance_client.close()
+                logger.info("Cliente Binance fechado.")
+            except Exception as e:
+                logger.error(f"Erro ao fechar cliente Binance: {e}")
+
+
+    def _adjust_parameters_based_on_trend(
+            self, trend_direction: str, trend_strength: str, trade_direction: str
+    ) -> tuple[float, float, float]:
+        """
+        Ajusta os parâmetros de trading baseado na tendência atual.
+        Substitui a funcionalidade do PatternBasedParameterAdjuster.
+
+        Args:
+            trend_direction: Direção da tendência ("UPTREND", "DOWNTREND", "NEUTRAL")
+            trend_strength: Força da tendência ("STRONG_TREND", "WEAK_TREND")
+            trade_direction: Direção do trade ("LONG", "SHORT")
+
+        Returns:
+            tuple: (entry_threshold, tp_adjustment_factor, sl_adjustment_factor)
+        """
+        # Valores padrão
+        entry_threshold = self.default_entry_threshold
+        tp_adjustment = 1.0  # Valor neutro, sem ajuste
+        sl_adjustment = 1.0  # Valor neutro, sem ajuste
+
+        # Verificar se a tendência é forte
+        is_strong_trend = trend_strength == "STRONG_TREND"
+
+        # Ajustar com base na tendência e direção do trade
+        if trend_direction == "UPTREND":
+            if trade_direction == "LONG":
+                # Trade a favor da tendência de alta
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
+                if is_strong_trend:
+                    # Em tendência forte, podemos ser mais agressivos com TP (aumentar) e menos com SL (reduzir)
+                    tp_adjustment = 1.2  # Aumenta TP em 20%
+                    sl_adjustment = 0.9  # Reduz SL em 10%
+                logger.info(f"LONG alinhado com tendência de ALTA: menos seletivo, TP mais agressivo")
+            else:  # SHORT
+                # Trade contra a tendência de alta
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
+                if is_strong_trend:
+                    # Em tendência forte de alta, ser mais conservador com trades SHORT
+                    tp_adjustment = 0.8  # Reduz TP em 20% (mais conservador)
+                    sl_adjustment = 0.7  # Reduz SL em 30% (mais próximo, protege mais)
+                logger.info(f"SHORT contra tendência de ALTA: mais seletivo, alvos reduzidos")
+
+        elif trend_direction == "DOWNTREND":
+            if trade_direction == "SHORT":
+                # Trade a favor da tendência de baixa
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
+                if is_strong_trend:
+                    # Em tendência forte, podemos ser mais agressivos com TP e menos com SL
+                    tp_adjustment = 1.2  # Aumenta TP em 20%
+                    sl_adjustment = 0.9  # Reduz SL em 10%
+                logger.info(f"SHORT alinhado com tendência de BAIXA: menos seletivo, TP mais agressivo")
+            else:  # LONG
+                # Trade contra a tendência de baixa
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
+                if is_strong_trend:
+                    # Em tendência forte de baixa, ser mais conservador com trades LONG
+                    tp_adjustment = 0.8  # Reduz TP em 20% (mais conservador)
+                    sl_adjustment = 0.7  # Reduz SL em 30% (mais próximo, protege mais)
+                logger.info(f"LONG contra tendência de BAIXA: mais seletivo, alvos reduzidos")
+
+        else:  # NEUTRAL
+            # Em mercado sem tendência clara, usar configurações específicas para mercado em range
+            entry_threshold = settings.ENTRY_THRESHOLD_RANGE
+            tp_adjustment = settings.TP_ADJUSTMENT_RANGE
+            sl_adjustment = settings.SL_ADJUSTMENT_RANGE
+            logger.info(f"Mercado NEUTRO: ajustando parâmetros para operação em range")
+
+        return entry_threshold, tp_adjustment, sl_adjustment
 
     async def _log_system_summary(self) -> None:
         """Log do resumo do sistema."""
@@ -1378,9 +1496,6 @@ class TradingBot:
         logger.info(
             f"Últimos candles processados: {len(self.data_handler.historical_df) if self.data_handler.historical_df is not None else 0}"
         )
-        logger.info(
-            f"Classificador de padrões: {'Operacional' if self.pattern_analyzer.pattern_classifier is not None else 'Não disponível'}"
-        )
 
         # Adicionar informações sobre o retreinamento
         retraining_status = self.model_retrainer.get_retraining_status()
@@ -1390,16 +1505,29 @@ class TradingBot:
         logger.info(f"Versão TP/SL: {retraining_status['tp_model_version']}/{retraining_status['sl_model_version']}")
 
         # Adicionar métricas de performance
-        if self.trades_history:
-            tp_count = sum(1 for trade in self.trades_history if trade['result'] == 'TP')
-            total_trades = len(self.trades_history)
-            win_rate = tp_count / total_trades * 100 if total_trades > 0 else 0
-            logger.info(f"Win Rate: {win_rate:.1f}% ({tp_count}/{total_trades})")
+        try:
+            metrics = self.performance_monitor.metrics
+            if metrics.total_trades > 0:
+                logger.info("-" * 30)
+                logger.info("MÉTRICAS DE PERFORMANCE")
+                logger.info(f"Total de trades: {metrics.total_trades}")
+                logger.info(f"Win rate: {metrics.win_rate:.2%}")
+                logger.info(f"P&L total: ${metrics.total_profit_loss:.2f}")
+                logger.info(f"Expectancy: ${metrics.expectancy:.2f}")
+
+                if metrics.long_trades > 0:
+                    logger.info(
+                        f"LONG win rate: {metrics.long_win_rate:.2%} ({metrics.long_wins}/{metrics.long_trades})")
+                if metrics.short_trades > 0:
+                    logger.info(
+                        f"SHORT win rate: {metrics.short_win_rate:.2%} ({metrics.short_wins}/{metrics.short_trades})")
+        except Exception as e:
+            logger.error(f"Erro ao incluir métricas de performance no resumo: {e}")
 
         logger.info("=" * 50)
 
     def _log_technical_analysis(
-            self, direction: str, pattern: str, entry_score: float, threshold: float
+            self, direction: str, trend_direction: str, entry_score: float, threshold: float
     ) -> None:
         """Log de análise técnica."""
         df_eval = self.data_handler.historical_df.copy()
@@ -1409,8 +1537,7 @@ class TradingBot:
         logger.info(
             f"Análise Técnica: "
             f"Direção={direction}, "
-            f"Padrão Mercado={pattern}, "
-            f"Tendência Local={trend} ({trend_strength}), "
+            f"Tendência={trend_direction} ({trend_strength}), "
             f"Score de Entrada={entry_score:.2f}, "
             f"Threshold Ajustado={threshold:.2f}"
         )
@@ -1441,3 +1568,79 @@ class TradingBot:
                 f"ALERTA: Pouca variação nas previsões! TP std={tp_std:.4f}%, SL std={sl_std:.4f}%. "
                 f"Considere retreinar o modelo ou verificar o pipeline de dados."
             )
+
+    async def process_completed_trades(self):
+        """
+        Processa trades completados para registrar valores reais de TP/SL.
+        Esta função busca informações de trades fechados diretamente da Binance
+        para alimentar o sistema de retreinamento e monitor de performance com dados reais.
+        """
+        try:
+            # Obter ordens executadas que não foram processadas
+            for order in self.order_executor.executed_orders:
+                if order.get("processed", False):
+                    continue
+
+                signal_id = order.get("signal_id")
+                order_id = order.get("order_id")
+
+                if not signal_id or not order_id or order_id == "N/A":
+                    continue
+
+                # Verificar se a posição foi fechada
+                is_closed = await self._check_order_status(order_id)
+
+                if is_closed:
+                    logger.info(f"Trade {signal_id} (ordem {order_id}) foi fechado. Obtendo resultados reais...")
+
+                    # Obter os dados reais do trade
+                    trade_result = await self._get_trade_result(order)
+
+                    if trade_result:
+                        result_type = trade_result["result"]
+                        exit_price = trade_result.get("exit_price")
+
+                        if exit_price:
+                            # Registrar saída no monitor de performance
+                            try:
+                                # Buscar o trade pelo signal_id
+                                trade = self.performance_monitor.get_trade_by_signal_id(signal_id)
+
+                                if trade:
+                                    # Registrar saída do trade
+                                    self.performance_monitor.register_trade_exit(
+                                        trade_id=trade.trade_id,
+                                        exit_price=exit_price,
+                                        exit_time=datetime.datetime.now()
+                                    )
+                                    logger.info(f"Saída de trade registrada no monitor: {signal_id}")
+                                else:
+                                    logger.warning(f"Trade com signal_id {signal_id} não encontrado no monitor")
+                            except Exception as e:
+                                logger.error(f"Erro ao registrar saída de trade no monitor: {e}")
+
+                        # Registrar dados para o retreinamento
+                        if result_type == "TP":
+                            actual_tp_pct = trade_result["actual_tp_pct"]
+                            predicted_tp_pct = order.get("predicted_tp_pct", 0)
+
+                            self.signal_generator.record_actual_values(
+                                signal_id, actual_tp_pct, 0, self.model_retrainer
+                            )
+
+                        elif result_type == "SL":
+                            actual_sl_pct = trade_result["actual_sl_pct"]
+                            predicted_sl_pct = order.get("predicted_sl_pct", 0)
+
+                            self.signal_generator.record_actual_values(
+                                signal_id, 0, actual_sl_pct, self.model_retrainer
+                            )
+
+                        # Marcar ordem como processada
+                        order["processed"] = True
+
+                    else:
+                        logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
+
+        except Exception as e:
+            logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
