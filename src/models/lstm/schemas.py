@@ -1,6 +1,6 @@
 # models\lstm\schemas.py
 
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 from models.base.schemas import ModelConfig, TrainingConfig
 
@@ -36,3 +36,17 @@ class LSTMTrainingConfig(TrainingConfig):
     reduce_lr_factor: float = Field(0.5, gt=0, lt=1, description="Fator de redução do learning rate")
     use_early_stopping: bool = Field(True, description="Usar ou não Early Stopping")
     min_delta: float = Field(0.001, ge=0, description="Melhoria mínima requerida para early stopping")
+
+
+class OptunaConfig(BaseModel):
+    """
+    Configuração para tunagem de hiperparâmetros com Optuna.
+    """
+    enabled: bool = Field(True, description="Habilitar a tunagem de hiperparâmetros")
+    n_trials: int = Field(30, gt=0, description="Número de trials para a otimização")
+    timeout: int | None = Field(None, description="Tempo máximo em segundos para a otimização (None para sem limite)")
+    study_name: str = Field("lstm_hyperparameter_study", description="Nome do estudo Optuna")
+    storage: str | None = Field(None,
+                                description="Caminho para o storage do Optuna (None para armazenamento em memória)")
+    direction: str = Field("minimize", description="Direção de otimização (minimize para loss)")
+    metric: str = Field("val_loss", description="Métrica a ser otimizada")

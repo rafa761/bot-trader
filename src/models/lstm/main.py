@@ -8,9 +8,9 @@ from core.config import settings
 from core.constants import TRAINED_MODELS_DIR, FEATURE_COLUMNS
 from core.logger import logger
 from models.lstm.model import LSTMModel
-from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
+from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig, OptunaConfig
 from models.lstm.trainer import LSTMTrainer
-from models.managers.model_manager import ModelManager
+from models.managers.optuna_model_manager import OptunaModelManager
 from repositories.data_handler import DataCollector, LabelCreator, TechnicalIndicatorAdder
 from repositories.data_preprocessor import DataPreprocessor
 
@@ -85,7 +85,7 @@ def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: s
 
 def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
     """
-    Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizados para CPU.
+    Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizáveis.
 
     Args:
         target_column: Coluna alvo para treinamento ('take_profit_pct' ou 'stop_loss_pct')
@@ -93,19 +93,32 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
     Returns:
         Tupla contendo o modelo, o treinador e as configurações.
     """
+    # Configuração base do modelo com suporte a tunagem automática
     model_config = LSTMConfig(
         model_name=f"lstm_btc_{target_column}",
-        version="1.1.0",
-        description=f"Modelo LSTM para previsão de {target_column} do Bitcoin",
+        version="1.2.0",
+        description=f"Modelo LSTM para previsão de {target_column} do Bitcoin (otimizado com Optuna)",
         sequence_length=24,
         lstm_units=[128, 64],
         dense_units=[32],
         dropout_rate=0.2,
+        recurrent_dropout_rate=0.1,
+        l2_regularization=0.0001,
         learning_rate=0.001,
         batch_size=64,
-        epochs=100
+        epochs=100,
+        # Configuração da tunagem de hiperparâmetros
+        optuna_config=OptunaConfig(
+            enabled=True,  # Habilitada por padrão
+            n_trials=30,  # 30 trials para explorar o espaço de parâmetros
+            timeout=3600,  # Limite de tempo de 1 hora
+            study_name=f"lstm_btc_{target_column}_study",
+            direction="minimize",
+            metric="val_loss"
+        )
     )
 
+    # Configuração de treinamento
     training_config = LSTMTrainingConfig(
         validation_split=0.15,
         early_stopping_patience=10,
@@ -118,6 +131,7 @@ def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
         shuffle=False
     )
 
+    # Instanciar modelo e treinador com a configuração inicial
     model = LSTMModel(model_config)
     trainer = LSTMTrainer(model, training_config)
 
@@ -207,9 +221,9 @@ def collect_and_prepare_data():
 
 def main():
     """
-    Função principal que executa o pipeline completo.
+    Função principal que executa o pipeline completo com tunagem de hiperparâmetros.
 
-    Configura o modelo, coleta dados, treina o modelo e avalia seu desempenho.
+    Configura o modelo, coleta dados, otimiza hiperparâmetros, treina o modelo e avalia seu desempenho.
     """
     try:
         # Coletar e preparar dados
@@ -229,11 +243,13 @@ def main():
             # Executar diagnóstico dos dados
             diagnose_data(df, FEATURE_COLUMNS, target)
 
-            # Configurar modelo e trainer
+            # Configurar modelo e trainer com suporte a tunagem
             model, trainer, model_config = setup_model_and_trainer(target)
 
-            # Criar gerenciador e executar pipeline
-            manager = ModelManager(model, trainer, model_config)
+            # Usar o OptunaModelManager em vez do ModelManager padrão
+            manager = OptunaModelManager(model, trainer, model_config)
+
+            # Executar pipeline com tunagem automática de hiperparâmetros
             metrics = manager.execute_full_pipeline(
                 data=df,
                 feature_columns=FEATURE_COLUMNS,
