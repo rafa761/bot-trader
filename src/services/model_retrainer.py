@@ -237,6 +237,107 @@ class ModelRetrainer:
                     f"Média dos últimos {len(self.recent_prediction_errors)} erros de previsão: {avg_error:.4f}"
                 )
 
+    def _apply_transfer_learning(self, new_model: LSTMModel, base_model: LSTMModel,
+                                 training_phase: str = "initial") -> bool:
+        """
+        Aplica transfer learning de forma avançada com congelamento seletivo de camadas e
+        técnicas de fine-tuning para otimizar o treinamento incremental.
+
+        Args:
+            new_model: Modelo novo que receberá os pesos
+            base_model: Modelo base de onde os pesos serão transferidos
+            training_phase: Fase de treinamento ('initial', 'fine_tuning')
+
+        Returns:
+            bool: True se o transfer learning foi aplicado com sucesso
+        """
+        try:
+            if not hasattr(base_model, 'model') or base_model.model is None:
+                logger.warning("Modelo base não possui atributo 'model' ou é None")
+                return False
+
+            if not hasattr(new_model, 'model') or new_model.model is None:
+                logger.warning("Modelo novo não possui atributo 'model' ou é None")
+                return False
+
+            # Verificar compatibilidade de arquitetura
+            base_weights = base_model.model.get_weights()
+            new_weights = new_model.model.get_weights()
+
+            if len(base_weights) != len(new_weights):
+                logger.warning(
+                    f"Incompatibilidade na estrutura dos modelos. "
+                    f"Base: {len(base_weights)} camadas, Novo: {len(new_weights)} camadas"
+                )
+                return False
+
+            # Verificar forma dos tensores de pesos para cada camada
+            compatible = True
+            for i, (base_w, new_w) in enumerate(zip(base_weights, new_weights)):
+                if base_w.shape != new_w.shape:
+                    logger.warning(
+                        f"Incompatibilidade na camada {i}: "
+                        f"Base: {base_w.shape}, Novo: {new_w.shape}"
+                    )
+                    compatible = False
+                    break
+
+            if not compatible:
+                logger.warning("Arquiteturas incompatíveis. Transfer learning não aplicado.")
+                return False
+
+            # Aplicar pesos do modelo base ao novo modelo
+            logger.info("Transferindo pesos do modelo base para o novo modelo...")
+            new_model.model.set_weights(base_weights)
+
+            # Congelamento seletivo de camadas com base na fase de treinamento
+            if training_phase == "initial":
+                # Fase inicial: congelar camadas LSTM (preservar conhecimento extraído)
+                layer_count = 0
+                for layer in new_model.model.layers:
+                    if 'lstm' in layer.name.lower():
+                        layer.trainable = False
+                        layer_count += 1
+                        logger.info(f"Congelada camada LSTM: {layer.name}")
+
+                logger.info(f"Total de {layer_count} camadas LSTM congeladas para fase inicial")
+
+            elif training_phase == "fine_tuning":
+                # Fase de fine-tuning: descongelar todas as camadas para ajuste fino
+                for layer in new_model.model.layers:
+                    layer.trainable = True
+
+                logger.info(f"Todas as camadas descongeladas para fase de fine-tuning")
+
+            # Ajustar taxa de aprendizado baseado na fase
+            if hasattr(new_model.model, 'optimizer'):
+                import tensorflow as tf
+
+                if training_phase == "initial":
+                    # Taxa reduzida para phase inicial (apenas ajustar camadas finais)
+                    lr = base_model.config.learning_rate * 0.4
+                else:
+                    # Taxa muito reduzida para fine-tuning (ajuste suave de todas as camadas)
+                    lr = base_model.config.learning_rate * 0.1
+
+                # Aplicar nova taxa de aprendizado
+                if isinstance(new_model.model.optimizer, tf.keras.optimizers.Adam):
+                    tf.keras.backend.set_value(new_model.model.optimizer.learning_rate, lr)
+                    logger.info(f"Taxa de aprendizado ajustada para {lr}")
+
+            # Armazenar métricas do modelo base para comparação posterior
+            if not hasattr(new_model, 'base_metrics'):
+                new_model.base_metrics = {}
+                if hasattr(base_model, 'last_metrics'):
+                    new_model.base_metrics = base_model.last_metrics.copy()
+
+            logger.info("Transfer learning aplicado com sucesso!")
+            return True
+
+        except Exception as e:
+            logger.error(f"Erro ao aplicar transfer learning: {e}", exc_info=True)
+            return False
+
     def _perform_retraining(self):
         """Executa o processo completo de retreinamento dos modelos."""
         if self.retraining_in_progress:
@@ -328,32 +429,59 @@ class ModelRetrainer:
 
                 # Inicializar novo modelo com pesos do anterior (transfer learning)
                 try:
-                    if hasattr(base_model, 'model') and base_model.model is not None:
-                        logger.info("Aplicando transfer learning - copiando pesos do modelo anterior")
-                        model.model.set_weights(base_model.model.get_weights())
-                except Exception as e:
-                    logger.warning(f"Não foi possível aplicar transfer learning: {e}")
+                    # Fase 1: Treinamento inicial com camadas LSTM congeladas
+                    transfer_success = self._apply_transfer_learning(
+                        model,
+                        base_model,
+                        training_phase="initial"
+                    )
 
-                # Executa Retreinamento
-                try:
+                    if transfer_success:
+                        # Treinamento inicial (apenas camadas finais são treinadas)
+                        initial_metrics = manager.execute_full_pipeline(
+                            data=df_processed,
+                            feature_columns=FEATURE_COLUMNS,
+                            target_column=target,
+                            save_path=TRAINED_MODELS_TEMP_DIR,
+                            epochs=10  # Menos épocas para primeira fase
+                        )
+
+                        logger.info(f"Fase inicial concluída com métricas: {initial_metrics}")
+
+                        # Fase 2: Fine-tuning com todas as camadas descongeladas
+                        self._apply_transfer_learning(
+                            model,
+                            base_model,
+                            training_phase="fine_tuning"
+                        )
+
+                        # Treinamento completo para ajuste fino
+                        metrics = manager.execute_full_pipeline(
+                            data=df_processed,
+                            feature_columns=FEATURE_COLUMNS,
+                            target_column=target,
+                            save_path=TRAINED_MODELS_TEMP_DIR
+                        )
+
+                        logger.info(f"Fase de fine-tuning concluída com métricas: {metrics}")
+                    else:
+                        # Se transfer learning falhar, treinamene normal
+                        logger.warning("Transfer learning falhou, executando treinamento normal")
+                        metrics = manager.execute_full_pipeline(
+                            data=df_processed,
+                            feature_columns=FEATURE_COLUMNS,
+                            target_column=target,
+                            save_path=TRAINED_MODELS_TEMP_DIR
+                        )
+                except Exception as e:
+                    logger.error(f"Erro durante processo de transfer learning: {e}", exc_info=True)
+                    # Treinamento normal como fallback
                     metrics = manager.execute_full_pipeline(
                         data=df_processed,
                         feature_columns=FEATURE_COLUMNS,
                         target_column=target,
-                        save_path=TRAINED_MODELS_TEMP_DIR,
+                        save_path=TRAINED_MODELS_TEMP_DIR
                     )
-
-                    # Salvar referência ao novo modelo
-                    new_models[target] = {
-                        'model': model,
-                        'metrics': metrics,
-                        'temp_path': TRAINED_MODELS_TEMP_DIR / f"{retraining_config.model_name}.keras"
-                    }
-
-                    logger.info(f"Retreinamento para {target} concluído com métricas: {metrics}")
-
-                except Exception as e:
-                    logger.error(f"Erro durante retreinamento do modelo {target}: {e}", exc_info=True)
 
             # 5. Substituir modelos antigos pelos novos
             self._replace_models(new_models)
@@ -414,6 +542,9 @@ class ModelRetrainer:
         Args:
             new_models: Dicionário com novos modelos e suas métricas
         """
+        should_update_tp = True
+        should_update_sl = True
+
         with self.lock:
             try:
                 # Flag para rastrear se algum modelo foi realmente atualizado
@@ -423,79 +554,93 @@ class ModelRetrainer:
                 if 'take_profit_pct' in new_models:
                     tp_info = new_models['take_profit_pct']
 
-                    if 'test_loss' in tp_info['metrics'] and hasattr(self.tp_model,
-                                                                     'last_metrics') and 'test_loss' in self.tp_model.last_metrics:
-                        if tp_info['metrics']['test_loss'] >= self.tp_model.last_metrics[
-                            'test_loss'] * 0.95:  # 5% de tolerância
+                    if 'test_loss' in tp_info['metrics'] and hasattr(self.tp_model, 'last_metrics'):
+                        if tp_info['metrics']['test_loss'] >= self.tp_model.last_metrics['test_loss'] * 0.95:
                             logger.warning(
-                                f"Novo modelo TP não apresenta melhoria significativa. Loss atual: {self.tp_model.last_metrics['test_loss']}, novo: {tp_info['metrics']['test_loss']}. Mantendo modelo atual.")
-                            return False
-                        # Armazenar métricas para comparações futuras
-                        self.tp_model.last_metrics = tp_info['metrics']
+                                f"Novo modelo TP não apresenta melhoria significativa. "
+                                f"Loss atual: {self.tp_model.last_metrics['test_loss']}, "
+                                f"novo: {tp_info['metrics']['test_loss']}. Mantendo modelo atual."
+                            )
+                            should_update_tp = False
+                        else:
+                            self.tp_model.last_metrics = tp_info['metrics']
 
-                    # Fazer backup do modelo antigo com timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.tp_model.config.model_name}_{timestamp}.keras"
+                    if should_update_tp:
+                        # Fazer backup do modelo antigo com timestamp
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.tp_model.config.model_name}_{timestamp}.keras"
 
-                    if self.tp_model_path.exists():
-                        try:
-                            import shutil
-                            shutil.copy2(self.tp_model_path, backup_path)
-                            logger.info(f"Backup do modelo TP criado em {backup_path}")
-                        except Exception as e:
-                            logger.error(f"Erro ao criar backup do modelo TP: {e}")
-
-                    # Mover novo modelo para localização padrão
-                    try:
-                        # Se o arquivo de destino já existir, removê-lo primeiro
                         if self.tp_model_path.exists():
-                            self.tp_model_path.unlink()
+                            try:
+                                import shutil
+                                shutil.copy2(self.tp_model_path, backup_path)
+                                logger.info(f"Backup do modelo TP criado em {backup_path}")
+                            except Exception as e:
+                                logger.error(f"Erro ao criar backup do modelo TP: {e}")
 
-                        # Copiar o novo modelo para o local correto
-                        import shutil
-                        shutil.copy2(tp_info['temp_path'], self.tp_model_path)
+                        # Mover novo modelo para localização padrão
+                        try:
+                            # Se o arquivo de destino já existir, removê-lo primeiro
+                            if self.tp_model_path.exists():
+                                self.tp_model_path.unlink()
 
-                        # Atualizar referência ao modelo
-                        self.tp_model = tp_info['model']
-                        models_updated = True
+                            # Copiar o novo modelo para o local correto
+                            import shutil
+                            shutil.copy2(tp_info['temp_path'], self.tp_model_path)
 
-                        logger.info(f"Modelo TP atualizado para versão {self.tp_model.config.version}")
-                    except Exception as e:
-                        logger.error(f"Erro ao substituir modelo TP: {e}", exc_info=True)
+                            # Atualizar referência ao modelo
+                            self.tp_model = tp_info['model']
+                            models_updated = True
+
+                            logger.info(f"Modelo TP atualizado para versão {self.tp_model.config.version}")
+                        except Exception as e:
+                            logger.error(f"Erro ao substituir modelo TP: {e}", exc_info=True)
 
                 # Substituir modelo de SL se disponível
                 if 'stop_loss_pct' in new_models:
                     sl_info = new_models['stop_loss_pct']
 
-                    # Fazer backup do modelo antigo com timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.sl_model.config.model_name}_{timestamp}.keras"
+                    if 'test_loss' in sl_info['metrics'] and hasattr(self.sl_model, 'last_metrics'):
+                        if sl_info['metrics']['test_loss'] >= self.sl_model.last_metrics['test_loss'] * 0.95:
+                            logger.warning(
+                                f"Novo modelo TP não apresenta melhoria significativa. "
+                                f"Loss atual: {self.sl_model.last_metrics['test_loss']}, "
+                                f"novo: {sl_info['metrics']['test_loss']}. Mantendo modelo atual."
+                            )
+                            should_update_sl = False  # alterar flag em vez de retornar
+                        else:
+                            self.sl_model.last_metrics = tp_info['metrics']
 
-                    if self.sl_model_path.exists():
-                        try:
-                            import shutil
-                            shutil.copy2(self.sl_model_path, backup_path)
-                            logger.info(f"Backup do modelo SL criado em {backup_path}")
-                        except Exception as e:
-                            logger.error(f"Erro ao criar backup do modelo SL: {e}")
+                    if should_update_sl:
+                        # Fazer backup do modelo antigo com timestamp
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        backup_path = TRAINED_MODELS_BACKUP_DIR / f"{self.sl_model.config.model_name}_{timestamp}.keras"
 
-                    # Mover novo modelo para localização padrão
-                    try:
-                        # Se o arquivo de destino já existir, removê-lo primeiro
                         if self.sl_model_path.exists():
-                            self.sl_model_path.unlink()
+                            try:
+                                import shutil
+                                shutil.copy2(self.sl_model_path, backup_path)
+                                logger.info(f"Backup do modelo SL criado em {backup_path}")
+                            except Exception as e:
+                                logger.error(f"Erro ao criar backup do modelo SL: {e}")
 
-                        # Copiar o novo modelo para o local correto
-                        import shutil
-                        shutil.copy2(sl_info['temp_path'], self.sl_model_path)
+                        # Mover novo modelo para localização padrão
+                        try:
+                            # Se o arquivo de destino já existir, removê-lo primeiro
+                            if self.sl_model_path.exists():
+                                self.sl_model_path.unlink()
 
-                        # Atualizar referência ao modelo
-                        self.sl_model = sl_info['model']
-                        models_updated = True
+                            # Copiar o novo modelo para o local correto
+                            import shutil
+                            shutil.copy2(sl_info['temp_path'], self.sl_model_path)
 
-                        logger.info(f"Modelo SL atualizado para versão {self.sl_model.config.version}")
-                    except Exception as e:
-                        logger.error(f"Erro ao substituir modelo SL: {e}", exc_info=True)
+                            # Atualizar referência ao modelo
+                            self.sl_model = sl_info['model']
+                            models_updated = True
+
+                            logger.info(f"Modelo SL atualizado para versão {self.sl_model.config.version}")
+                        except Exception as e:
+                            logger.error(f"Erro ao substituir modelo SL: {e}", exc_info=True)
 
                 # Atualizar o signal generator do bot, se fornecido
                 if models_updated and self.signal_generator_ref:
