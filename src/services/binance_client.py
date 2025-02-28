@@ -1,6 +1,7 @@
 # services/binance_client.py
 
 import asyncio
+import math
 from typing import Optional, Tuple, Dict, Any
 
 from binance import AsyncClient
@@ -176,21 +177,35 @@ class BinanceClient:
 
         # Obter o preço atual para verificar o valor notional
         current_price = await self.get_futures_last_price(symbol)
+
+        # Calcular valor notional inicial
+        original_quantity = quantity
+        formatted_qty = self.format_quantity_for_step_size(quantity, step_size)
         notional_value = float(formatted_qty) * current_price
 
+        # Verificar se atende ao valor mínimo notional
         if notional_value < min_notional:
             logger.warning(
                 f"Valor notional ({notional_value:.2f} USDT) abaixo do mínimo da Binance ({min_notional} USDT). "
                 f"Quantidade: {formatted_qty} {symbol}. Preço: {current_price} USDT"
             )
 
-            # Tentar ajustar a quantidade para atingir o mínimo
-            min_qty = min_notional / current_price
-            formatted_min_qty = self.format_quantity_for_step_size(min_qty, step_size)
+            # Calcular nova quantidade com MARGEM DE SEGURANÇA para garantir valor mínimo
+            # Usamos ceiling para garantir arredondamento para cima
+            min_qty_raw = (min_notional * 1.1) / current_price  # 10% acima do mínimo para segurança
+
+            # Calcular quantos passos de step_size precisamos
+            steps = math.ceil(min_qty_raw / step_size)
+            min_qty = steps * step_size  # Garantir múltiplo exato de step_size
+
+            new_notional = min_qty * current_price
 
             logger.info(
-                f"Tentando ajustar quantidade para {formatted_min_qty} {symbol} (valor: {float(formatted_min_qty) * current_price:.2f} USDT)")
-            formatted_qty = formatted_min_qty
+                f"Ajustando quantidade de {formatted_qty} para {min_qty:.3f} {symbol} "
+                f"(valor: {new_notional:.2f} USDT) para atender ao mínimo da Binance"
+            )
+
+            formatted_qty = f"{min_qty:.3f}"  # Com 3 casas decimais para 0.001 step_size
 
         while attempt < max_attempts:
             try:
@@ -286,7 +301,15 @@ class BinanceClient:
         Returns:
             str: Quantidade formatada em string
         """
+        # Calcular quantos steps completos cabem na quantidade (arredondando para baixo)
+        steps = math.floor(qty / step_size)
+        # Multiplicar para obter o valor exato múltiplo do step_size
+        adjusted_qty = steps * step_size
+
+        # Determinar número de casas decimais para formatação
         decimals = 0
         if '.' in str(step_size):
             decimals = len(str(step_size).split('.')[-1])
-        return f"{qty:.{decimals}f}"
+
+        # Formatar com a precisão correta
+        return f"{adjusted_qty:.{decimals}f}"

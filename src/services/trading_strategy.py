@@ -116,16 +116,16 @@ class TradingStrategy:
         if quantity < base_quantity:
             logger.info(f"Quantidade ajustada para limite máximo: {quantity:.4f} (era {base_quantity:.4f})")
 
-        # Verificar se atende ao valor mínimo notional da Binance
-        notional_value = quantity * current_price
-        if notional_value < min_notional:
-            # Ajustar para o mínimo requerido
-            min_quantity = min_notional / current_price
-            logger.warning(
-                f"Quantidade calculada ({quantity:.4f} BTC, ${notional_value:.2f}) abaixo do valor mínimo da Binance. "
-                f"Ajustando para {min_quantity:.4f} BTC (${min_notional:.2f})"
-            )
-            quantity = min_quantity
+            # Verificar se atende ao valor mínimo notional da Binance
+            notional_value = quantity * current_price
+            if notional_value < min_notional:
+                # Ajustar para o mínimo requerido com margem de segurança
+                min_quantity = (min_notional * 1.05) / current_price
+                logger.warning(
+                    f"Quantidade calculada ({quantity:.4f} BTC, ${notional_value:.2f}) abaixo do valor mínimo da Binance. "
+                    f"Ajustando para {min_quantity:.4f} BTC (${min_quantity * current_price:.2f})"
+                )
+                quantity = min_quantity
 
         return quantity
 

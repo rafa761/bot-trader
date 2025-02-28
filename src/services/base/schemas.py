@@ -19,6 +19,7 @@ class TradingParameters(BaseModel):
 
 class TradingSignal(BaseModel):
     """Sinal de trading completo gerado pelos modelos."""
+    id: str = Field(..., description="ID do sinal de trading")
     direction: Literal["LONG", "SHORT"] = Field(..., description="Direção do trade")
     side: Literal["BUY", "SELL"] = Field(..., description="Lado da ordem (BUY/SELL)")
     position_side: Literal["LONG", "SHORT"] = Field(..., description="Lado da posição (LONG/SHORT)")

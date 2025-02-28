@@ -578,6 +578,7 @@ class BinanceOrderExecutor(OrderExecutor):
         try:
             # Obter o valor atual de ATR, se disponível
             current_atr = signal.atr_value
+            min_notional = 100.0  # Mínimo exigido pela Binance
 
             # Calcula quantidade
             qty = self.strategy.calculate_trade_quantity(
@@ -586,6 +587,7 @@ class BinanceOrderExecutor(OrderExecutor):
                 leverage=settings.LEVERAGE,
                 risk_per_trade=settings.RISK_PER_TRADE,
                 atr_value=current_atr,
+                min_notional=min_notional,
             )
 
             # Ajusta quantidade
@@ -594,8 +596,31 @@ class BinanceOrderExecutor(OrderExecutor):
                 logger.warning("Qty ajustada <= 0. Trade abortado.")
                 return OrderResult(success=False, error_message="Quantidade ajustada <= 0")
 
+            # Verificar valor notional mínimo da Binance (IMPORTANTE: código estava indentado incorretamente)
+            notional_value = qty_adj * signal.current_price
+
+            if notional_value < min_notional:
+                # Recalcular quantidade para atender ao mínimo da Binance com margem de segurança
+                import math
+                min_qty = (min_notional * 1.1) / signal.current_price  # 10% acima para segurança
+
+                # Garantir que seja múltiplo exato do step_size
+                steps = math.ceil(min_qty / self.step_size)
+                min_qty_adjusted = steps * self.step_size
+
+                new_notional = min_qty_adjusted * signal.current_price
+
+                logger.warning(
+                    f"Valor notional calculado ({notional_value:.2f} USDT) abaixo do mínimo da Binance ({min_notional} USDT). "
+                    f"Ajustando quantidade de {qty_adj:.3f} para {min_qty_adjusted:.3f} {settings.SYMBOL} "
+                    f"(valor estimado: {new_notional:.2f} USDT)"
+                )
+
+                qty_adj = min_qty_adjusted
+
             logger.info(
-                f"Abrindo {signal.direction} c/ qty={qty_adj}, lastPrice={signal.current_price:.2f}..."
+                f"Abrindo {signal.direction} c/ qty={qty_adj:.3f}, lastPrice={signal.current_price:.2f}, "
+                f"valor={qty_adj * signal.current_price:.2f} USDT (mínimo={min_notional} USDT)..."
             )
 
             # Coloca a ordem de abertura
@@ -625,8 +650,8 @@ class BinanceOrderExecutor(OrderExecutor):
                     "predicted_sl_pct": signal.predicted_sl_pct,
                     "timestamp": current_time,
                     "filled": True,
-                    "processed": False,  # Importante para o processamento posterior
-                    "position_side": signal.position_side  # Adicionar para referência
+                    "processed": False,
+                    "position_side": signal.position_side
                 })
 
                 # Limitar tamanho do histórico
