@@ -1,5 +1,6 @@
 # services/base/schemas.py
-from typing import Literal
+from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +14,8 @@ class TradingParameters(BaseModel):
 
 class TradingSignal(BaseModel):
     """Sinal de trading completo gerado pelos modelos."""
-    id: str = Field(..., description="Identificador único do sinal")
+    id: str = Field(
+        default_factory=lambda: f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}")
     direction: Literal["LONG", "SHORT"] = Field(..., description="Direção do trade")
     side: Literal["BUY", "SELL"] = Field(..., description="Lado da ordem (BUY/SELL)")
     position_side: Literal["LONG", "SHORT"] = Field(..., description="Lado da posição (LONG/SHORT)")
@@ -27,7 +29,9 @@ class TradingSignal(BaseModel):
     atr_value: float | None = Field(None, description="Valor atual do ATR, se disponível")
     entry_score: float | None = Field(None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
     rr_ratio: float | None = Field(None, gt=0, description="Razão risco/recompensa calculada")
-    timestamp: object = Field(None, description="Timestamp de criação do sinal")
+    market_trend: str | None = Field(None, description="Tendência do mercado (UPTREND, DOWNTREND, NEUTRAL)")
+    market_strength: str | None = Field(None, description="Força da tendência (STRONG_TREND, WEAK_TREND)")
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class OrderResult(BaseModel):

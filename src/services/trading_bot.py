@@ -24,6 +24,7 @@ from services.base.services import (
 )
 from services.binance_client import BinanceClient
 from services.model_retrainer import ModelRetrainer
+from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import TrendAnalyzer
 
@@ -451,6 +452,10 @@ class LSTMSignalGenerator(SignalGenerator):
             # Obter ATR para ajustes de quantidade
             atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
 
+            # Determinar tendência e força
+            market_trend = TrendAnalyzer.ema_trend(df)
+            market_strength = TrendAnalyzer.adx_trend(df)
+
             signal = TradingSignal(
                 id=signal_id,
                 direction=direction,
@@ -466,6 +471,8 @@ class LSTMSignalGenerator(SignalGenerator):
                 atr_value=atr_value,
                 entry_score=entry_score,
                 rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+                market_trend=market_trend,
+                market_strength=market_strength,
                 timestamp=datetime.datetime.now()
             )
 
@@ -482,11 +489,13 @@ class BinanceOrderExecutor(OrderExecutor):
             self,
             binance_client: BinanceClient,
             strategy: TradingStrategy,
+            performance_monitor: TradePerformanceMonitor | None = None,
             tick_size: float = 0.0,
             step_size: float = 0.0
     ):
         self.client = binance_client
         self.strategy = strategy
+        self.performance_monitor = performance_monitor
         self.tick_size = tick_size
         self.step_size = step_size
 
@@ -654,6 +663,39 @@ class BinanceOrderExecutor(OrderExecutor):
                 if len(self.executed_orders) > self.max_order_history:
                     self.executed_orders.pop(0)
 
+            # Registrar o trade no monitor de performance (usando self.performance_monitor diretamente)
+            if self.performance_monitor is not None:
+                try:
+                    # Garantir que temos todos os dados necessários
+                    market_trend = getattr(signal, 'market_trend', None)
+                    market_strength = getattr(signal, 'market_strength', None)
+
+                    # Calcular volatilidade
+                    volatility = None
+                    if signal.atr_value:
+                        volatility = (signal.atr_value / signal.current_price) * 100
+
+                    self.performance_monitor.register_trade_from_signal(
+                        signal_id=signal.id,
+                        direction=signal.direction,
+                        entry_price=signal.current_price,
+                        quantity=qty_adj,
+                        tp_target_price=signal.tp_price,
+                        sl_target_price=signal.sl_price,
+                        predicted_tp_pct=signal.predicted_tp_pct,
+                        predicted_sl_pct=signal.predicted_sl_pct,
+                        market_trend=market_trend,
+                        market_volatility=volatility,
+                        market_strength=market_strength,
+                        entry_score=signal.entry_score if hasattr(signal, 'entry_score') else None,
+                        rr_ratio=signal.rr_ratio if hasattr(signal, 'rr_ratio') else None,
+                        leverage=settings.LEVERAGE,
+                        trade_id=str(order_resp.get("orderId"))
+                    )
+                    logger.info(f"Trade {signal.id} registrado no monitor de performance")
+                except Exception as e:
+                    logger.error(f"Erro ao registrar trade no monitor de performance: {e}")
+
                 # Coloca as ordens de TP e SL
                 tp_sl_result = await self.place_tp_sl(
                     signal.direction,
@@ -696,13 +738,20 @@ class TradingBot:
         # DataHandler
         self.data_handler = DataHandler(binance_client)
 
+        # Instanciar o monitor de performance antes da estratégia
+        self.performance_monitor = TradePerformanceMonitor()
+
         # Estratégia
         self.strategy = TradingStrategy()
 
         # Componentes do SOLID
         self.data_provider = BinanceDataProvider(binance_client, self.data_handler)
         self.signal_generator = LSTMSignalGenerator(tp_model, sl_model, self.strategy)
-        self.order_executor = BinanceOrderExecutor(binance_client, self.strategy)
+        self.order_executor = BinanceOrderExecutor(
+            binance_client,
+            self.strategy,
+            performance_monitor=self.performance_monitor
+        )
 
         # Sistema de retreinamento - Com referência para o signal_generator
         self.model_retrainer = ModelRetrainer(
@@ -994,8 +1043,6 @@ class TradingBot:
     async def process_completed_trades(self):
         """
         Processa trades completados para registrar valores reais de TP/SL.
-        Esta função busca informações de trades fechados diretamente da Binance
-        para alimentar o sistema de retreinamento com dados reais.
         """
         try:
             # Obter todas as ordens executadas que não foram processadas ainda
@@ -1021,65 +1068,49 @@ class TradingBot:
 
                     if trade_result:
                         result_type = trade_result["result"]
+                        exit_price = trade_result.get("exit_price")
 
-                        # Registrar os resultados com base no tipo de fechamento (TP ou SL)
+                        # Registrar no monitor de performance (se possível)
+                        if exit_price and self.performance_monitor:
+                            try:
+                                # Buscar o trade pelo signal_id
+                                trade = self.performance_monitor.get_trade_by_signal_id(signal_id)
+
+                                if trade:
+                                    # Registrar saída do trade
+                                    self.performance_monitor.register_trade_exit(
+                                        trade_id=trade.trade_id,
+                                        exit_price=exit_price,
+                                        exit_time=datetime.datetime.now()
+                                    )
+                                    logger.info(f"Saída de trade registrada no monitor: {signal_id}")
+                                else:
+                                    logger.warning(f"Trade com signal_id {signal_id} não encontrado no monitor")
+                            except Exception as e:
+                                logger.error(f"Erro ao registrar saída de trade no monitor: {e}")
+
+                        # Registrar dados para o retreinamento
                         if result_type == "TP":
                             actual_tp_pct = trade_result["actual_tp_pct"]
                             predicted_tp_pct = order.get("predicted_tp_pct", 0)
 
-                            # Registrar no histórico de trades
-                            self.trades_history.append({
-                                "signal_id": signal_id,
-                                "direction": order.get("direction"),
-                                "result": "TP",
-                                "predicted_tp_pct": predicted_tp_pct,
-                                "actual_tp_pct": actual_tp_pct,
-                                "close_time": datetime.datetime.now(),
-                                "entry_price": order.get("entry_price"),
-                                "exit_price": trade_result.get("exit_price")
-                            })
-
-                            # Registrar dados para o retreinamento
                             self.signal_generator.record_actual_values(
                                 signal_id, actual_tp_pct, 0, self.model_retrainer
                             )
-
-                            logger.info(
-                                f"Trade {signal_id} atingiu TP: previsto={predicted_tp_pct:.2f}%, real={actual_tp_pct:.2f}%")
 
                         elif result_type == "SL":
                             actual_sl_pct = trade_result["actual_sl_pct"]
                             predicted_sl_pct = order.get("predicted_sl_pct", 0)
 
-                            # Registrar no histórico de trades
-                            self.trades_history.append({
-                                "signal_id": signal_id,
-                                "direction": order.get("direction"),
-                                "result": "SL",
-                                "predicted_sl_pct": predicted_sl_pct,
-                                "actual_sl_pct": actual_sl_pct,
-                                "close_time": datetime.datetime.now(),
-                                "entry_price": order.get("entry_price"),
-                                "exit_price": trade_result.get("exit_price")
-                            })
-
-                            # Registrar dados para o retreinamento
                             self.signal_generator.record_actual_values(
                                 signal_id, 0, actual_sl_pct, self.model_retrainer
                             )
 
-                            logger.info(
-                                f"Trade {signal_id} atingiu SL: previsto={predicted_sl_pct:.2f}%, real={actual_sl_pct:.2f}%")
-
-                        # Marcar ordem como processada para não processá-la novamente
+                        # Marcar ordem como processada
                         order["processed"] = True
 
                     else:
                         logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
-
-            # Limitar tamanho do histórico
-            if len(self.trades_history) > self.max_trades_history:
-                self.trades_history = self.trades_history[-self.max_trades_history:]
 
         except Exception as e:
             logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
@@ -1099,6 +1130,10 @@ class TradingBot:
                 # A cada 10 ciclos, mostra um resumo do sistema
                 if self.cycle_count % 10 == 0:
                     await self._log_system_summary()
+
+                    # Adicionar resumo de performance a cada 10 ciclos
+                    if self.cycle_count % 30 == 0:  # A cada 30 ciclos (aproximadamente a cada 2.5 minutos)
+                        self.performance_monitor.log_performance_summary()
 
                 # Periodicamente verificar o status do retreinamento
                 if self.cycle_count % self.check_retraining_status_interval == 0:
@@ -1363,11 +1398,24 @@ class TradingBot:
         logger.info(f"Versão TP/SL: {retraining_status['tp_model_version']}/{retraining_status['sl_model_version']}")
 
         # Adicionar métricas de performance
-        if self.trades_history:
-            tp_count = sum(1 for trade in self.trades_history if trade['result'] == 'TP')
-            total_trades = len(self.trades_history)
-            win_rate = tp_count / total_trades * 100 if total_trades > 0 else 0
-            logger.info(f"Win Rate: {win_rate:.1f}% ({tp_count}/{total_trades})")
+        try:
+            metrics = self.performance_monitor.metrics
+            if metrics.total_trades > 0:
+                logger.info("-" * 30)
+                logger.info("MÉTRICAS DE PERFORMANCE")
+                logger.info(f"Total de trades: {metrics.total_trades}")
+                logger.info(f"Win rate: {metrics.win_rate:.2%}")
+                logger.info(f"P&L total: ${metrics.total_profit_loss:.2f}")
+                logger.info(f"Expectancy: ${metrics.expectancy:.2f}")
+
+                if metrics.long_trades > 0:
+                    logger.info(
+                        f"LONG win rate: {metrics.long_win_rate:.2%} ({metrics.long_wins}/{metrics.long_trades})")
+                if metrics.short_trades > 0:
+                    logger.info(
+                        f"SHORT win rate: {metrics.short_win_rate:.2%} ({metrics.short_wins}/{metrics.short_trades})")
+        except Exception as e:
+            logger.error(f"Erro ao incluir métricas de performance no resumo: {e}")
 
         logger.info("=" * 50)
 
@@ -1413,3 +1461,79 @@ class TradingBot:
                 f"ALERTA: Pouca variação nas previsões! TP std={tp_std:.4f}%, SL std={sl_std:.4f}%. "
                 f"Considere retreinar o modelo ou verificar o pipeline de dados."
             )
+
+    async def process_completed_trades(self):
+        """
+        Processa trades completados para registrar valores reais de TP/SL.
+        Esta função busca informações de trades fechados diretamente da Binance
+        para alimentar o sistema de retreinamento e monitor de performance com dados reais.
+        """
+        try:
+            # Obter ordens executadas que não foram processadas
+            for order in self.order_executor.executed_orders:
+                if order.get("processed", False):
+                    continue
+
+                signal_id = order.get("signal_id")
+                order_id = order.get("order_id")
+
+                if not signal_id or not order_id or order_id == "N/A":
+                    continue
+
+                # Verificar se a posição foi fechada
+                is_closed = await self._check_order_status(order_id)
+
+                if is_closed:
+                    logger.info(f"Trade {signal_id} (ordem {order_id}) foi fechado. Obtendo resultados reais...")
+
+                    # Obter os dados reais do trade
+                    trade_result = await self._get_trade_result(order)
+
+                    if trade_result:
+                        result_type = trade_result["result"]
+                        exit_price = trade_result.get("exit_price")
+
+                        if exit_price:
+                            # Registrar saída no monitor de performance
+                            try:
+                                # Buscar o trade pelo signal_id
+                                trade = self.performance_monitor.get_trade_by_signal_id(signal_id)
+
+                                if trade:
+                                    # Registrar saída do trade
+                                    self.performance_monitor.register_trade_exit(
+                                        trade_id=trade.trade_id,
+                                        exit_price=exit_price,
+                                        exit_time=datetime.datetime.now()
+                                    )
+                                    logger.info(f"Saída de trade registrada no monitor: {signal_id}")
+                                else:
+                                    logger.warning(f"Trade com signal_id {signal_id} não encontrado no monitor")
+                            except Exception as e:
+                                logger.error(f"Erro ao registrar saída de trade no monitor: {e}")
+
+                        # Registrar dados para o retreinamento
+                        if result_type == "TP":
+                            actual_tp_pct = trade_result["actual_tp_pct"]
+                            predicted_tp_pct = order.get("predicted_tp_pct", 0)
+
+                            self.signal_generator.record_actual_values(
+                                signal_id, actual_tp_pct, 0, self.model_retrainer
+                            )
+
+                        elif result_type == "SL":
+                            actual_sl_pct = trade_result["actual_sl_pct"]
+                            predicted_sl_pct = order.get("predicted_sl_pct", 0)
+
+                            self.signal_generator.record_actual_values(
+                                signal_id, 0, actual_sl_pct, self.model_retrainer
+                            )
+
+                        # Marcar ordem como processada
+                        order["processed"] = True
+
+                    else:
+                        logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
+
+        except Exception as e:
+            logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
