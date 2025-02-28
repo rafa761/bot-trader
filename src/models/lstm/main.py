@@ -8,10 +8,11 @@ from core.config import settings
 from core.constants import TRAINED_MODELS_DIR, FEATURE_COLUMNS
 from core.logger import logger
 from models.lstm.model import LSTMModel
-from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
+from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig, OptunaConfig
 from models.lstm.trainer import LSTMTrainer
-from models.managers.model_manager import ModelManager
-from repositories.data_handler import DataCollector, LabelCreator
+from models.managers.optuna_model_manager import OptunaModelManager
+from repositories.data_handler import DataCollector, LabelCreator, TechnicalIndicatorAdder
+from repositories.data_preprocessor import DataPreprocessor
 
 
 def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: str):
@@ -82,9 +83,9 @@ def diagnose_data(df: pd.DataFrame, feature_columns: list[str], target_column: s
         )
 
 
-def setup_model_and_trainer(target_column='take_profit_pct'):
+def setup_model_and_trainer(target_column: str = 'take_profit_pct'):
     """
-    Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizados para CPU.
+    Configura e inicializa o modelo LSTM e seu treinador com parâmetros otimizáveis.
 
     Args:
         target_column: Coluna alvo para treinamento ('take_profit_pct' ou 'stop_loss_pct')
@@ -92,33 +93,45 @@ def setup_model_and_trainer(target_column='take_profit_pct'):
     Returns:
         Tupla contendo o modelo, o treinador e as configurações.
     """
-    # Configurar modelo e trainer
+    # Configuração base do modelo com suporte a tunagem automática
     model_config = LSTMConfig(
         model_name=f"lstm_btc_{target_column}",
-        version="1.1.0",
-        description=f"Modelo LSTM para previsão de {target_column} do Bitcoin",
-        # Parâmetros específicos do LSTM otimizados para CPU
-        sequence_length=16,  # OTIMIZAÇÃO: Reduzido de 24 para 16 (menos contexto temporal, mais rápido)
-        lstm_units=[64, 32],  # OTIMIZAÇÃO: Reduzido de [128, 64] para [64, 32] (menos computação)
-        dense_units=[16],  # OTIMIZAÇÃO: Reduzido de [32] para [16] (menos computação)
-        dropout_rate=0.1,  # OTIMIZAÇÃO: Reduzido de 0.2 para 0.1 (menos regularização, mais rápido)
-        learning_rate=0.002,  # OTIMIZAÇÃO: Aumentado para convergência mais rápida
-        batch_size=64,  # OTIMIZAÇÃO: Aumentado para melhor utilização de cache/memória
-        epochs=50  # OTIMIZAÇÃO: Reduzido para treinamento mais rápido
+        version="1.2.0",
+        description=f"Modelo LSTM para previsão de {target_column} do Bitcoin (otimizado com Optuna)",
+        sequence_length=24,
+        lstm_units=[128, 64],
+        dense_units=[32],
+        dropout_rate=0.2,
+        recurrent_dropout_rate=0.1,
+        l2_regularization=0.0001,
+        learning_rate=0.001,
+        batch_size=64,
+        epochs=100,
+        # Configuração da tunagem de hiperparâmetros
+        optuna_config=OptunaConfig(
+            enabled=True,  # Habilitada por padrão
+            n_trials=30,  # 30 trials para explorar o espaço de parâmetros
+            timeout=3600,  # Limite de tempo de 1 hora
+            study_name=f"lstm_btc_{target_column}_study",
+            direction="minimize",
+            metric="val_loss"
+        )
     )
 
+    # Configuração de treinamento
     training_config = LSTMTrainingConfig(
-        validation_split=0.15,  # OTIMIZAÇÃO: Reduzido para treinamento mais rápido
-        early_stopping_patience=5,  # OTIMIZAÇÃO: Interrompe treinamento mais cedo
-        reduce_lr_patience=3,  # OTIMIZAÇÃO: Reduz learning rate mais cedo
-        reduce_lr_factor=0.5,  # Mantido em 0.5
-        # Parâmetros padrão
+        validation_split=0.15,
+        early_stopping_patience=10,
+        reduce_lr_patience=3,
+        reduce_lr_factor=0.5,
+        use_early_stopping=True,
+        min_delta=0.001,
         test_size=0.2,
         random_state=42,
-        shuffle=False  # Importante para séries temporais
+        shuffle=False
     )
 
-    # Criar modelo e trainer
+    # Instanciar modelo e treinador com a configuração inicial
     model = LSTMModel(model_config)
     trainer = LSTMTrainer(model, training_config)
 
@@ -127,13 +140,16 @@ def setup_model_and_trainer(target_column='take_profit_pct'):
 
 def collect_and_prepare_data():
     """
-    Coleta dados históricos da Binance e prepara-os para treinamento.
-
-    Returns:
-        DataFrame pandas contendo os dados preparados ou None se ocorrer erro.
+    Coleta dados históricos da Binance e prepara-os para treinamento
+    seguindo a sequência adequada:
+    1. Coleta dados brutos OHLCV
+    2. Remove outliers nos dados OHLCV
+    3. Calcula indicadores técnicos nos dados OHLCV limpos
+    4. Cria labels baseadas nos indicadores
+    5. Realiza normalização e processamento final de todas as features
     """
     try:
-        # Coletar dados com timeout adequado
+        # 1. Coletar dados brutos (sem indicadores)
         client = Client(
             settings.BINANCE_API_KEY,
             settings.BINANCE_API_SECRET,
@@ -141,31 +157,73 @@ def collect_and_prepare_data():
         )
 
         data_collector = DataCollector(client)
-        df = data_collector.get_historical_klines()
+        # Obter apenas dados OHLCV sem indicadores técnicos
+        raw_df = data_collector.get_historical_klines(add_indicators=False)
 
-        if df.empty:
+        if raw_df.empty:
             logger.error("Não foi possível coletar dados históricos")
             return None
 
-        # Criar labels
-        df = LabelCreator.create_labels(df)
+        logger.info(f"Dados brutos coletados: {len(raw_df)} registros")
 
-        if df.empty:
+        # 2. Processar os dados OHLCV para remover outliers
+        # Criar um preprocessador temporário apenas para OHLCV
+        ohlcv_columns = ['open', 'high', 'low', 'close', 'volume']
+        ohlcv_preprocessor = DataPreprocessor(
+            feature_columns=ohlcv_columns,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
+        ohlcv_preprocessor.fit(raw_df)
+
+        # Detectar e remover outliers apenas (sem normalizar ainda)
+        cleaned_df = ohlcv_preprocessor.detect_outliers(raw_df)
+
+        logger.info(f"Outliers removidos dos dados OHLCV. Processando indicadores...")
+
+        # 3. Calcular indicadores técnicos nos dados OHLCV limpos
+        df_with_indicators = TechnicalIndicatorAdder.add_technical_indicators(cleaned_df)
+
+        if df_with_indicators.empty:
+            logger.error("Falha ao adicionar indicadores técnicos")
+            return None
+
+        logger.info(f"Indicadores técnicos calculados com sucesso: {len(df_with_indicators.columns)} colunas")
+
+        # 4. Criar labels baseadas nos dados com indicadores limpos
+        df_with_labels = LabelCreator.create_labels(df_with_indicators)
+
+        if df_with_labels.empty:
             logger.error("Não foi possível criar labels")
             return None
 
-        return df
+        logger.info("Labels criadas com sucesso")
+
+        # 5. Normalizar e processar todas as features para o modelo
+        full_preprocessor = DataPreprocessor(
+            feature_columns=FEATURE_COLUMNS,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
+        full_preprocessor.fit(df_with_labels)
+
+        # Processar o DataFrame para o modelo (normalização, conversão de tipos, etc.)
+        df_processed = full_preprocessor.process_dataframe(df_with_labels)
+
+        logger.info(
+            f"Dados processados com sucesso. Tamanho final: {len(df_processed)} linhas, {len(df_processed.columns)} colunas")
+
+        return df_processed
 
     except Exception as e:
-        logger.error(f"Erro ao coletar e preparar dados: {e}")
+        logger.error(f"Erro ao coletar e preparar dados: {e}", exc_info=True)
         return None
-
 
 def main():
     """
-    Função principal que executa o pipeline completo.
+    Função principal que executa o pipeline completo com tunagem de hiperparâmetros.
 
-    Configura o modelo, coleta dados, treina o modelo e avalia seu desempenho.
+    Configura o modelo, coleta dados, otimiza hiperparâmetros, treina o modelo e avalia seu desempenho.
     """
     try:
         # Coletar e preparar dados
@@ -185,11 +243,13 @@ def main():
             # Executar diagnóstico dos dados
             diagnose_data(df, FEATURE_COLUMNS, target)
 
-            # Configurar modelo e trainer
+            # Configurar modelo e trainer com suporte a tunagem
             model, trainer, model_config = setup_model_and_trainer(target)
 
-            # Criar gerenciador e executar pipeline
-            manager = ModelManager(model, trainer, model_config)
+            # Usar o OptunaModelManager em vez do ModelManager padrão
+            manager = OptunaModelManager(model, trainer, model_config)
+
+            # Executar pipeline com tunagem automática de hiperparâmetros
             metrics = manager.execute_full_pipeline(
                 data=df,
                 feature_columns=FEATURE_COLUMNS,

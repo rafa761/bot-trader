@@ -2,8 +2,12 @@
 
 from pathlib import Path
 
+import numpy as np
+from keras.api.layers import BatchNormalization
 from keras.api.layers import Input, LSTM, Dense, Dropout
 from keras.api.models import Model, load_model
+from keras.api.optimizers import Adam
+from keras.api.regularizers import L2
 
 from core.constants import FEATURE_COLUMNS
 from core.logger import logger
@@ -28,9 +32,7 @@ class LSTMModel(BaseModel):
                    lstm_units, etc.
         """
         super().__init__(config)
-        self.config = config  # Garantindo que config seja do tipo LSTMConfig
-        # Aqui, usamos len(FEATURE_COLUMNS) para determinar o número de features
-        # Se você precisar de um número diferente, atualize este valor ou passe-o na configuração
+        self.config = config
         self.n_features = len(FEATURE_COLUMNS)
         logger.info(f"Modelo LSTM inicializado com {self.n_features} features")
         self.model = None
@@ -39,30 +41,29 @@ class LSTMModel(BaseModel):
     def build_model(self):
         """
         Constrói a arquitetura do modelo LSTM com base na configuração.
-
-        Cria uma rede neural com camadas LSTM seguidas por camadas densas,
-        conforme especificado na configuração.
-
-        Raises:
-            Exception: Se ocorrer algum erro durante a construção do modelo.
+        Versão otimizada para hardware de alto desempenho.
         """
         logger.info("Construindo arquitetura do modelo LSTM...")
         try:
-            # Definir input layer explicitamente com nome para facilitar debugging
+            # Definir input layer
             inputs = Input(shape=(self.config.sequence_length, self.n_features), name="input_layer")
 
-            # OTIMIZAÇÃO: Usando return_sequences=False para primeira camada se houver apenas uma camada LSTM
-            # Isso simplifica o modelo e reduz a carga computacional
-            is_single_lstm_layer = len(self.config.lstm_units) == 1
+            # Normalização de batch para estabilizar o treinamento
+            x = BatchNormalization(name="batch_norm_input")(inputs)
 
             # Primeira camada LSTM
+            is_single_lstm_layer = len(self.config.lstm_units) == 1
             x = LSTM(
                 units=self.config.lstm_units[0],
                 return_sequences=not is_single_lstm_layer,
                 name="lstm",
-                # OTIMIZAÇÃO: Adicionando unroll=True para melhorar desempenho em sequências fixas em CPU
-                unroll=True
-            )(inputs)
+                activation='tanh',
+                recurrent_activation='sigmoid',
+                recurrent_dropout=self.config.recurrent_dropout_rate,
+                kernel_regularizer=L2(self.config.l2_regularization),
+                recurrent_regularizer=L2(self.config.l2_regularization / 2),
+                unroll=False
+            )(x)
             x = Dropout(self.config.dropout_rate, name="dropout")(x)
 
             # Camadas LSTM intermediárias
@@ -72,33 +73,46 @@ class LSTMModel(BaseModel):
                     units=units,
                     return_sequences=return_sequences,
                     name=f"lstm_{i}",
-                    # OTIMIZAÇÃO: Adicionando unroll=True para melhorar desempenho em sequências fixas em CPU
-                    unroll=True
+                    activation='tanh',
+                    recurrent_activation='sigmoid',
+                    recurrent_dropout=self.config.recurrent_dropout_rate,
+                    kernel_regularizer=L2(self.config.l2_regularization),
+                    recurrent_regularizer=L2(self.config.l2_regularization / 2),
+                    unroll=False
                 )(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i}")(x)
 
-            # Camadas densas
+            # Camadas densas expandidas
             for i, units in enumerate(self.config.dense_units):
-                x = Dense(units=units, activation='relu', name=f"dense_{i}")(x)
+                x = Dense(
+                    units=units,
+                    activation='relu',
+                    name=f"dense_{i}",
+                    kernel_regularizer=L2(self.config.l2_regularization)
+                )(x)
+                x = BatchNormalization(name=f"batch_norm_dense_{i}")(x)
                 x = Dropout(self.config.dropout_rate, name=f"dropout_{i + len(self.config.lstm_units)}")(x)
 
-            # Camada de saída
-            outputs = Dense(units=1, name="output")(x)
+            # Camada de saída - sem ativação linear
+            outputs = Dense(units=1, activation='linear', name="output")(x)
 
             # Criar modelo
             self.model = Model(inputs=inputs, outputs=outputs)
 
-            # Compilar modelo
+            # Compilar modelo com otimizador avançado
+            optimizer = Adam(
+                learning_rate=self.config.learning_rate,
+                amsgrad=self.config.use_amsgrad
+            )
+
             self.model.compile(
-                optimizer='adam',  # OTIMIZAÇÃO: Usando string 'adam' para aproveitar otimizações internas do Keras
+                optimizer=optimizer,
                 loss='mse',
-                metrics=['mae']
+                metrics=['mae', 'mse']
             )
 
             logger.info("Modelo LSTM construído com sucesso")
             logger.info(f"Sumário do modelo:\n{self.model.summary()}")
-            logger.info(f"Forma de entrada esperada: {self.model.input_shape}")
-            logger.info(f"Forma de saída esperada: {self.model.output_shape}")
 
         except Exception as e:
             logger.error(f"Erro ao construir modelo LSTM: {e}")
@@ -123,6 +137,21 @@ class LSTMModel(BaseModel):
             raise ValueError("Modelo não foi treinado ainda")
 
         try:
+            if input_data is None or len(input_data) == 0:
+                raise ValueError("Dados de entrada vazios")
+
+            # Verificar se o formato é o correto
+            if len(input_data.shape) != 3:
+                raise ValueError(f"Formato de entrada inválido. Esperado 3D, recebido: {input_data.shape}")
+
+            # Verificar valores anormais
+            if np.isnan(input_data).any():
+                logger.warning("Valores NaN detectados nos dados de entrada!")
+                input_data = np.nan_to_num(input_data, nan=0.0)
+
+            logger.debug(
+                f"Estatísticas do input: min={np.min(input_data)}, max={np.max(input_data)}, mean={np.mean(input_data)}")
+
             # Verificar se o input_data tem a forma correta
             expected_shape = self.model.input_shape
             if input_data.shape[1:] != expected_shape[1:]:
@@ -139,8 +168,11 @@ class LSTMModel(BaseModel):
                         f"Modelo espera {expected_shape[2]} features, mas os dados têm apenas {input_data.shape[2]}"
                     )
 
-            # OTIMIZAÇÃO: Usando batch_size definido na configuração para previsões em lote
-            predictions = self.model.predict(input_data, batch_size=self.config.batch_size)
+            # Usar batch_size=1 para evitar problemas com previsões em lote
+            predictions = self.model.predict(input_data, batch_size=1, verbose=1)
+
+            logger.debug(f"Previsões geradas: {predictions}")
+
             return predictions
         except Exception as e:
             logger.error(f"Erro ao fazer previsões: {e}")
@@ -157,11 +189,10 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o salvamento.
         """
         try:
-            # Garantir que o diretório exista
             path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Salvar o modelo
             self.model.save(path)
+
             logger.info(f"Modelo salvo em {path}")
         except Exception as e:
             logger.error(f"Erro ao salvar modelo: {e}")
@@ -184,7 +215,6 @@ class LSTMModel(BaseModel):
             Exception: Se ocorrer algum erro durante o carregamento.
         """
         try:
-            # Carregar o modelo
             loaded_model = load_model(path)
             logger.info(f"Modelo carregado de {path}")
 

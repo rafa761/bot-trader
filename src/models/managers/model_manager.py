@@ -43,6 +43,7 @@ class ModelManager:
             feature_columns: list[str],
             target_column: str,
             save_path: Path,
+            epochs: int = None,
     ) -> dict:
         """
         Executa o pipeline completo de treinamento.
@@ -52,6 +53,7 @@ class ModelManager:
             feature_columns: Lista de colunas a serem usadas como features.
             target_column: Coluna a ser usada como alvo.
             save_path: Caminho onde o modelo será salvo.
+            epochs: Número de épocas para treinamento, se None usa o valor padrão do modelo
 
         Returns:
             Dicionário com as métricas de avaliação do modelo.
@@ -61,6 +63,13 @@ class ModelManager:
         """
         try:
             logger.info(f"Iniciando pipeline de treinamento do modelo {self.config.model_name}...")
+
+            # Se epochs foi especificado, salvar temporariamente e restaurar depois
+            original_epochs = None
+            if epochs is not None and hasattr(self.model, 'config'):
+                original_epochs = self.model.config.epochs
+                self.model.config.epochs = epochs
+                logger.info(f"Usando {epochs} épocas para este treinamento")
 
             # 1. Preparação dos dados
             logger.info("Preparando os dados...")
@@ -87,6 +96,10 @@ class ModelManager:
             model_path = save_path / f"{self.config.model_name}.keras"
             self.model.save(model_path)
             logger.info(f"Modelo salvo com sucesso em {model_path}.")
+
+            # Restaurar configuração original de épocas
+            if original_epochs is not None:
+                self.model.config.epochs = original_epochs
 
             return self.metrics
 

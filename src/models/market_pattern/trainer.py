@@ -1,7 +1,5 @@
 # models/market_pattern/trainer.py
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -9,6 +7,7 @@ from keras.api.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoin
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
 
+from core.constants import TRAINED_MODELS_CHECKPOINTS_DIR
 from core.logger import logger
 from models.base.trainer import BaseTrainer
 from models.market_pattern.model import MarketPatternClassifier
@@ -189,14 +188,13 @@ class MarketPatternTrainer(BaseTrainer):
 
         return X_seq, y_seq
 
-    def train(self, X_train: pd.DataFrame, y_train: pd.Series, checkpoint_dir: Path = None):
+    def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         """
         Treina o modelo classificador de padrões de mercado.
 
         Args:
             X_train: DataFrame com dados históricos
             y_train: Ignorado (usa apenas X_train, que deve conter os dados necessários)
-            checkpoint_dir: Diretório opcional para salvar checkpoints
 
         Raises:
             Exception: Se ocorrer algum erro durante o treinamento
@@ -224,17 +222,14 @@ class MarketPatternTrainer(BaseTrainer):
                 )
             ]
 
-            # Adicionar checkpoint se diretório for fornecido
-            if checkpoint_dir:
-                checkpoint_dir.mkdir(parents=True, exist_ok=True)
-                checkpoint_path = checkpoint_dir / f"{self.model.config.model_name}_checkpoint.h5"
-                callbacks.append(
-                    ModelCheckpoint(
-                        filepath=str(checkpoint_path),
-                        save_best_only=True,
-                        monitor='val_loss'
-                    )
+            checkpoint_path = TRAINED_MODELS_CHECKPOINTS_DIR / f"{self.model.config.model_name}_checkpoint.keras"
+            callbacks.append(
+                ModelCheckpoint(
+                    filepath=str(checkpoint_path),
+                    save_best_only=True,
+                    monitor='val_loss'
                 )
+            )
 
             # 4. Calcular class_weights se habilitado
             class_weights = None
