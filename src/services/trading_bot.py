@@ -7,14 +7,12 @@ import numpy as np
 import pandas as pd
 
 from core.config import settings
-from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
+from core.constants import FEATURE_COLUMNS
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from repositories.data_handler import DataHandler
 from repositories.data_preprocessor import DataPreprocessor
 from services.base.schemas import (
-    MarketPatternResult,
-    TradingParameters,
     TradingSignal,
     OrderResult,
     TPSLResult
@@ -22,9 +20,7 @@ from services.base.schemas import (
 from services.base.services import (
     MarketDataProvider,
     SignalGenerator,
-    OrderExecutor,
-    MarketPatternAnalyzer,
-    ParameterAdjuster
+    OrderExecutor
 )
 from services.binance_client import BinanceClient
 from services.model_retrainer import ModelRetrainer
@@ -596,7 +592,7 @@ class BinanceOrderExecutor(OrderExecutor):
                 logger.warning("Qty ajustada <= 0. Trade abortado.")
                 return OrderResult(success=False, error_message="Quantidade ajustada <= 0")
 
-            # Verificar valor notional mínimo da Binance (IMPORTANTE: código estava indentado incorretamente)
+            # Verificar valor notional mínimo da Binance
             notional_value = qty_adj * signal.current_price
 
             if notional_value < min_notional:
@@ -679,122 +675,7 @@ class BinanceOrderExecutor(OrderExecutor):
             return OrderResult(success=False, error_message=error_msg)
 
 
-class ModelBasedPatternAnalyzer(MarketPatternAnalyzer):
-    """Analisador de padrões de mercado baseado em modelos."""
-
-    def __init__(self, pattern_classifier, sequence_length: int = 16):
-        self.pattern_classifier = pattern_classifier
-        self.sequence_length = sequence_length
-
-    def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """Prepara uma sequência para o classificador de padrões."""
-        # Verifica se todos os FEATURE_COLUMNS existem no DataFrame
-        missing_columns = [col for col in FEATURE_COLUMNS if col not in df.columns]
-        if missing_columns:
-            logger.warning(f"Colunas ausentes no DataFrame: {missing_columns}")
-            return None
-
-        # Verifica se há dados suficientes
-        if len(df) < self.sequence_length:
-            logger.warning(
-                f"Dados insuficientes para classificação. Necessário: {self.sequence_length}, "
-                f"Disponível: {len(df)}"
-            )
-            return None
-
-        try:
-            # Pegar as últimas 'sequence_length' entradas
-            last_sequence = df[FEATURE_COLUMNS].values[-self.sequence_length:]
-
-            # Reformatar para o formato esperado [samples, time steps, features]
-            x_pred = np.array([last_sequence])
-
-            return x_pred
-        except Exception as e:
-            logger.error(f"Erro ao preparar sequência para classificação: {e}", exc_info=True)
-            return None
-
-    def analyze_pattern(self, df: pd.DataFrame) -> MarketPatternResult:
-        """Analisa e identifica o padrão atual do mercado."""
-        if self.pattern_classifier is None:
-            logger.warning("Classificador de padrões não carregado. Retornando padrão neutro.")
-            return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-        try:
-            # Preparar sequência para previsão
-            X_seq = self._prepare_sequence(df)
-            if X_seq is None:
-                return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-            # Fazer previsão
-            pattern, probabilities = self.pattern_classifier.predict(X_seq)
-            confidence = float(np.max(probabilities))
-
-            logger.info(f"Padrão de mercado detectado: {pattern} (confiança: {confidence:.2f})")
-            return MarketPatternResult(pattern=pattern, confidence=confidence)
-
-        except Exception as e:
-            logger.error(f"Erro ao prever padrão de mercado: {e}", exc_info=True)
-            return MarketPatternResult(pattern="UNKNOWN", confidence=0.0)
-
-
-class PatternBasedParameterAdjuster(ParameterAdjuster):
-    """Ajusta parâmetros de trading baseado no padrão de mercado."""
-
-    def adjust_parameters(
-            self, pattern: str, confidence: float, direction: str
-    ) -> TradingParameters:
-        """Ajusta os parâmetros de trading baseado no padrão de mercado."""
-        # Valores padrão
-        params = TradingParameters(
-            entry_threshold=settings.ENTRY_THRESHOLD_DEFAULT,
-            tp_adjustment_factor=1.0,
-            sl_adjustment_factor=1.0
-        )
-
-        # Só ajustar se a confiança for razoável
-        if confidence < 0.6:
-            return params
-
-        if pattern == "RANGE":
-            # Em mercado lateralizado, ser mais conservador
-            params.entry_threshold = settings.ENTRY_THRESHOLD_RANGE
-            # Ajustar TP/SL para valores menores
-            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_RANGE
-            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_RANGE
-            logger.info(
-                "Ajustando estratégia para mercado em RANGE: trades mais seletivos, targets menores"
-            )
-
-        elif pattern == "VOLATILE":
-            # Em mercado volátil, ser muito seletivo
-            params.entry_threshold = settings.ENTRY_THRESHOLD_VOLATILE
-            # Ampliar stops para evitar stop-outs
-            params.tp_adjustment_factor = settings.TP_ADJUSTMENT_VOLATILE
-            params.sl_adjustment_factor = settings.SL_ADJUSTMENT_VOLATILE
-            logger.info(
-                "Ajustando estratégia para mercado VOLÁTIL: muito seletivo, stops mais amplos"
-            )
-
-        elif pattern in ["UPTREND", "DOWNTREND"]:
-            # Em tendência definida, verificar alinhamento
-            if (direction == "LONG" and pattern == "UPTREND") or \
-                    (direction == "SHORT" and pattern == "DOWNTREND"):
-                # Trade a favor da tendência - ser mais agressivo
-                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
-                logger.info(
-                    f"Trade {direction} alinhado com tendência {pattern}: menos seletivo"
-                )
-            else:
-                # Trade contra a tendência - ser mais cauteloso
-                params.entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
-                logger.info(
-                    f"Trade {direction} contra tendência {pattern}: mais seletivo"
-                )
-
-        return params
-
-# Classe principal refatorada
+# Classe principal refatorada, removendo a análise de padrão de mercado
 class TradingBot:
     """
     Classe principal do bot de trading, que coordena os demais componentes
@@ -823,13 +704,6 @@ class TradingBot:
         self.signal_generator = LSTMSignalGenerator(tp_model, sl_model, self.strategy)
         self.order_executor = BinanceOrderExecutor(binance_client, self.strategy)
 
-        # Classificador de padrões
-        pattern_classifier = self._load_pattern_classifier()
-        self.pattern_analyzer = ModelBasedPatternAnalyzer(pattern_classifier)
-
-        # Ajustador de parâmetros
-        self.parameter_adjuster = PatternBasedParameterAdjuster()
-
         # Sistema de retreinamento - Com referência para o signal_generator
         self.model_retrainer = ModelRetrainer(
             tp_model=tp_model,
@@ -857,6 +731,11 @@ class TradingBot:
 
         # Flag para verificação de retreinamento
         self.check_retraining_status_interval = 60  # Verificar a cada 60 ciclos
+
+        # Valores padrão para parâmetros de trading
+        self.default_entry_threshold = settings.ENTRY_THRESHOLD_DEFAULT
+        self.default_tp_adjustment = 1.0
+        self.default_sl_adjustment = 1.0
 
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
@@ -1205,39 +1084,6 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro ao processar trades completados: {e}", exc_info=True)
 
-    def _load_pattern_classifier(self):
-        """Carrega o modelo classificador de padrões de mercado."""
-        try:
-            pattern_classifier_path = TRAINED_MODELS_DIR / "market_pattern_classifier.keras"
-
-            if pattern_classifier_path.exists():
-                try:
-                    from models.market_pattern.model import MarketPatternClassifier
-                    from models.market_pattern.schemas import MarketPatternConfig
-
-                    pattern_config = MarketPatternConfig(
-                        model_name="market_pattern_classifier",
-                        num_classes=4,
-                        class_names=["UPTREND", "DOWNTREND", "RANGE", "VOLATILE"]
-                    )
-
-                    classifier = MarketPatternClassifier.load(pattern_classifier_path, pattern_config)
-                    logger.info("Classificador de padrões de mercado carregado com sucesso")
-                    return classifier
-
-                except Exception as e:
-                    logger.error(f"Erro ao carregar classificador de padrões: {e}", exc_info=True)
-                    return None
-            else:
-                logger.warning(
-                    f"Classificador de padrões não encontrado em {pattern_classifier_path}. "
-                    f"Usando análise de tendência padrão."
-                )
-                return None
-        except Exception as e:
-            logger.warning(f"Erro ao tentar carregar classificador de padrões: {e}")
-            return None
-
     async def run(self) -> None:
         """
         Método principal do bot, refatorado para seguir os princípios SOLID.
@@ -1298,12 +1144,14 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 5. Analisar padrão de mercado
-                pattern_result = self.pattern_analyzer.analyze_pattern(df)
+                # 5. Analisar tendência de mercado atual usando TrendAnalyzer
+                trend_direction = TrendAnalyzer.ema_trend(df)
+                trend_strength = TrendAnalyzer.adx_trend(df)
 
-                # 6. Ajustar parâmetros baseado no padrão
-                params = self.parameter_adjuster.adjust_parameters(
-                    pattern_result.pattern, pattern_result.confidence, signal.direction
+                # 6. Determinar parâmetros de trading baseados na tendência
+                # Substituindo a funcionalidade do MarketPatternAnalyzer e PatternBasedParameterAdjuster
+                entry_threshold, tp_adjustment, sl_adjustment = self._adjust_parameters_based_on_trend(
+                    trend_direction, trend_strength, signal.direction
                 )
 
                 # 7. Avaliar qualidade da entrada considerando parâmetros do sinal já gerado
@@ -1313,25 +1161,25 @@ class TradingBot:
                     signal.direction,
                     predicted_tp_pct=signal.predicted_tp_pct,
                     predicted_sl_pct=signal.predicted_sl_pct,
-                    entry_threshold=params.entry_threshold
+                    entry_threshold=entry_threshold
                 )
 
                 # 8. Log de análise técnica
                 self._log_technical_analysis(
-                    signal.direction, pattern_result.pattern, entry_score, params.entry_threshold
+                    signal.direction, trend_direction, entry_score, entry_threshold
                 )
 
                 if not should_enter:
                     logger.info(
                         f"Sinal {signal.direction} gerado, mas condições de mercado não favoráveis. "
-                        f"Score: {entry_score:.2f} < {params.entry_threshold:.2f}"
+                        f"Score: {entry_score:.2f} < {entry_threshold:.2f}"
                     )
                     await asyncio.sleep(5)
                     continue
 
-                # 9. Ajustar fatores de TP/SL baseado no padrão
-                signal.tp_factor *= params.tp_adjustment_factor
-                signal.sl_factor *= params.sl_adjustment_factor
+                # 9. Ajustar fatores de TP/SL baseado na tendência
+                signal.tp_factor *= tp_adjustment
+                signal.sl_factor *= sl_adjustment
                 signal.tp_price = signal.current_price * signal.tp_factor
                 signal.sl_price = signal.current_price * signal.sl_factor
 
@@ -1368,6 +1216,75 @@ class TradingBot:
             await self.order_executor.client.close()
             logger.info("Conexões do bot fechadas corretamente.")
 
+    def _adjust_parameters_based_on_trend(
+            self, trend_direction: str, trend_strength: str, trade_direction: str
+    ) -> tuple[float, float, float]:
+        """
+        Ajusta os parâmetros de trading baseado na tendência atual.
+        Substitui a funcionalidade do PatternBasedParameterAdjuster.
+
+        Args:
+            trend_direction: Direção da tendência ("UPTREND", "DOWNTREND", "NEUTRAL")
+            trend_strength: Força da tendência ("STRONG_TREND", "WEAK_TREND")
+            trade_direction: Direção do trade ("LONG", "SHORT")
+
+        Returns:
+            tuple: (entry_threshold, tp_adjustment_factor, sl_adjustment_factor)
+        """
+        # Valores padrão
+        entry_threshold = self.default_entry_threshold
+        tp_adjustment = self.default_tp_adjustment
+        sl_adjustment = self.default_sl_adjustment
+
+        # Verificar se a tendência é forte
+        is_strong_trend = trend_strength == "STRONG_TREND"
+
+        # Ajustar com base na tendência e direção do trade
+        if trend_direction == "UPTREND":
+            if trade_direction == "LONG":
+                # Trade a favor da tendência de alta
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
+                if is_strong_trend:
+                    # Em tendência forte, podemos ser mais agressivos com TP
+                    tp_adjustment = 1.2
+                    sl_adjustment = 0.9
+                logger.info(f"LONG alinhado com tendência de ALTA: menos seletivo, TP mais agressivo")
+            else:  # SHORT
+                # Trade contra a tendência de alta
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
+                if is_strong_trend:
+                    # Em tendência forte de alta, ser mais conservador com trades SHORT
+                    tp_adjustment = 0.8
+                    sl_adjustment = 0.7
+                logger.info(f"SHORT contra tendência de ALTA: mais seletivo, alvos reduzidos")
+
+        elif trend_direction == "DOWNTREND":
+            if trade_direction == "SHORT":
+                # Trade a favor da tendência de baixa
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_ALIGNED
+                if is_strong_trend:
+                    # Em tendência forte, podemos ser mais agressivos com TP
+                    tp_adjustment = 1.2
+                    sl_adjustment = 0.9
+                logger.info(f"SHORT alinhado com tendência de BAIXA: menos seletivo, TP mais agressivo")
+            else:  # LONG
+                # Trade contra a tendência de baixa
+                entry_threshold = settings.ENTRY_THRESHOLD_TREND_AGAINST
+                if is_strong_trend:
+                    # Em tendência forte de baixa, ser mais conservador com trades LONG
+                    tp_adjustment = 0.8
+                    sl_adjustment = 0.7
+                logger.info(f"LONG contra tendência de BAIXA: mais seletivo, alvos reduzidos")
+
+        else:  # NEUTRAL
+            # Em mercado sem tendência clara, usar configurações específicas para mercado em range
+            entry_threshold = settings.ENTRY_THRESHOLD_RANGE
+            tp_adjustment = settings.TP_ADJUSTMENT_RANGE
+            sl_adjustment = settings.SL_ADJUSTMENT_RANGE
+            logger.info(f"Mercado NEUTRO: ajustando parâmetros para operação em range")
+
+        return entry_threshold, tp_adjustment, sl_adjustment
+
     async def _log_system_summary(self) -> None:
         """Log do resumo do sistema."""
         logger.info("=" * 50)
@@ -1377,9 +1294,6 @@ class TradingBot:
         logger.info(f"Risco por Trade: {settings.RISK_PER_TRADE * 100}%")
         logger.info(
             f"Últimos candles processados: {len(self.data_handler.historical_df) if self.data_handler.historical_df is not None else 0}"
-        )
-        logger.info(
-            f"Classificador de padrões: {'Operacional' if self.pattern_analyzer.pattern_classifier is not None else 'Não disponível'}"
         )
 
         # Adicionar informações sobre o retreinamento
@@ -1399,7 +1313,7 @@ class TradingBot:
         logger.info("=" * 50)
 
     def _log_technical_analysis(
-            self, direction: str, pattern: str, entry_score: float, threshold: float
+            self, direction: str, trend_direction: str, entry_score: float, threshold: float
     ) -> None:
         """Log de análise técnica."""
         df_eval = self.data_handler.historical_df.copy()
@@ -1409,8 +1323,7 @@ class TradingBot:
         logger.info(
             f"Análise Técnica: "
             f"Direção={direction}, "
-            f"Padrão Mercado={pattern}, "
-            f"Tendência Local={trend} ({trend_strength}), "
+            f"Tendência={trend_direction} ({trend_strength}), "
             f"Score de Entrada={entry_score:.2f}, "
             f"Threshold Ajustado={threshold:.2f}"
         )

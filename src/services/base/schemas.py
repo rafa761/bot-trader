@@ -4,12 +4,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class MarketPatternResult(BaseModel):
-    """Resultado da análise de padrão de mercado."""
-    pattern: str = Field(..., description="Padrão de mercado identificado")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Nível de confiança da identificação (0.0 a 1.0)")
-
-
 class TradingParameters(BaseModel):
     """Parâmetros ajustados para trading com base no padrão de mercado."""
     entry_threshold: float = Field(0.6, ge=0.0, le=1.0, description="Limiar para score de entrada")
@@ -19,7 +13,7 @@ class TradingParameters(BaseModel):
 
 class TradingSignal(BaseModel):
     """Sinal de trading completo gerado pelos modelos."""
-    id: str = Field(..., description="ID do sinal de trading")
+    id: str = Field(..., description="Identificador único do sinal")
     direction: Literal["LONG", "SHORT"] = Field(..., description="Direção do trade")
     side: Literal["BUY", "SELL"] = Field(..., description="Lado da ordem (BUY/SELL)")
     position_side: Literal["LONG", "SHORT"] = Field(..., description="Lado da posição (LONG/SHORT)")
@@ -33,6 +27,8 @@ class TradingSignal(BaseModel):
     atr_value: float | None = Field(None, description="Valor atual do ATR, se disponível")
     entry_score: float | None = Field(None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
     rr_ratio: float | None = Field(None, gt=0, description="Razão risco/recompensa calculada")
+    timestamp: object = Field(None, description="Timestamp de criação do sinal")
+
 
 class OrderResult(BaseModel):
     """Resultado da execução de uma ordem."""
