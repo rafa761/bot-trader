@@ -23,6 +23,7 @@ from services.base.services import (
     OrderExecutor
 )
 from services.binance_client import BinanceClient
+from services.cleanup_handler import CleanupHandler
 from services.model_retrainer import ModelRetrainer
 from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
@@ -733,10 +734,10 @@ class TradingBot:
             sl_model: Modelo LSTM para previsão de Stop Loss
         """
         # Instancia o cliente Binance
-        binance_client = BinanceClient()
+        self.binance_client = BinanceClient()
 
         # DataHandler
-        self.data_handler = DataHandler(binance_client)
+        self.data_handler = DataHandler(self.binance_client)
 
         # Instanciar o monitor de performance antes da estratégia
         self.performance_monitor = TradePerformanceMonitor()
@@ -745,10 +746,10 @@ class TradingBot:
         self.strategy = TradingStrategy()
 
         # Componentes do SOLID
-        self.data_provider = BinanceDataProvider(binance_client, self.data_handler)
+        self.data_provider = BinanceDataProvider(self.binance_client, self.data_handler)
         self.signal_generator = LSTMSignalGenerator(tp_model, sl_model, self.strategy)
         self.order_executor = BinanceOrderExecutor(
-            binance_client,
+            self.binance_client,
             self.strategy,
             performance_monitor=self.performance_monitor
         )
@@ -763,6 +764,10 @@ class TradingBot:
             min_data_points=1000,  # Mínimo de 1000 pontos de dados
             performance_threshold=0.15  # Limiar de erro para retreinamento
         )
+
+        # Adicionar manipulador de limpeza para interrupções
+        self.cleanup_handler = CleanupHandler(self.binance_client, settings.SYMBOL)
+        self.cleanup_handler.register()
 
         # Controle de estado interno
         self.last_retraining_check = datetime.datetime.now()
@@ -1303,12 +1308,114 @@ class TradingBot:
 
                 await asyncio.sleep(5)
 
+
+        except asyncio.CancelledError:
+            logger.info("Tarefa do bot cancelada. Realizando limpeza...")
+            await self.cleanup()
+            raise
+        except KeyboardInterrupt:
+            logger.info("Interrupção do teclado detectada no método run. Realizando limpeza...")
+            await self.cleanup()
         except Exception as e:
             logger.error(f"Erro no loop principal do bot: {e}", exc_info=True)
         finally:
-            # Garantir que o cliente seja fechado corretamente
-            await self.order_executor.client.close()
-            logger.info("Conexões do bot fechadas corretamente.")
+            # Garantir que o cliente seja fechado corretamente mesmo sem execução do cleanup
+            try:
+                await self.binance_client.close()
+                logger.info("Conexões do bot fechadas corretamente.")
+            except Exception as e:
+                logger.error(f"Erro ao fechar conexões: {e}")
+
+    async def cleanup(self) -> None:
+        """
+        Limpa todas as ordens e posições abertas.
+        Este método é chamado quando o bot está sendo encerrado.
+        """
+        logger.info("Iniciando limpeza de ordens e posições...")
+        try:
+            # Verificar se o cleanup_handler está disponível
+            if hasattr(self, 'cleanup_handler') and self.cleanup_handler:
+                await self.cleanup_handler.execute_cleanup()
+            else:
+                # Fallback caso o cleanup_handler não esteja disponível
+                logger.warning("CleanupHandler não encontrado. Tentando limpeza direta...")
+
+                # Tentar inicializar o cliente Binance se ainda não estiver inicializado
+                if not self.binance_client._initialized:
+                    await self.binance_client.initialize()
+
+                # Cancelar todas as ordens abertas
+                try:
+                    result = await self.binance_client.client.futures_cancel_all_open_orders(
+                        symbol=settings.SYMBOL
+                    )
+                    logger.info(f"Ordens canceladas: {result}")
+                except Exception as e:
+                    logger.error(f"Erro ao cancelar ordens: {e}")
+
+                # Fechar todas as posições abertas
+                try:
+                    positions = await self.binance_client.client.futures_position_information(
+                        symbol=settings.SYMBOL
+                    )
+
+                    for position in positions:
+                        position_amt = float(position['positionAmt'])
+                        if position_amt == 0:
+                            continue  # Pular posições vazias
+
+                        # Determinar direção da posição e parâmetros para fechamento
+                        if position_amt > 0:  # Posição LONG
+                            side = "SELL"
+                            position_side = "LONG"
+                        else:  # Posição SHORT
+                            side = "BUY"
+                            position_side = "SHORT"
+
+                        # Quantidade absoluta (remover sinal)
+                        quantity = abs(position_amt)
+
+                        # Tentar fechar com estratégia de fallback
+                        try:
+                            # Primeira tentativa: sem reduceOnly
+                            close_order = await self.binance_client.client.futures_create_order(
+                                symbol=settings.SYMBOL,
+                                side=side,
+                                positionSide=position_side,
+                                type="MARKET",
+                                quantity=f"{quantity}"  # Sem o parâmetro reduceOnly
+                            )
+
+                            logger.info(f"Posição fechada: {position_side} {quantity} {settings.SYMBOL}")
+                        except Exception as order_error:
+                            logger.warning(f"Erro ao fechar posição: {order_error}. Tentando método alternativo...")
+
+                            # Segunda tentativa: com closePosition
+                            try:
+                                close_order = await self.binance_client.client.futures_create_order(
+                                    symbol=settings.SYMBOL,
+                                    side=side,
+                                    positionSide=position_side,
+                                    type="MARKET",
+                                    closePosition=True
+                                )
+                                logger.info(f"Posição fechada (método alternativo): {position_side} {settings.SYMBOL}")
+                            except Exception as alt_error:
+                                logger.error(f"Não foi possível fechar posição {position_side}: {alt_error}")
+                except Exception as e:
+                    logger.error(f"Erro ao fechar posições: {e}")
+
+            logger.info("Limpeza concluída.")
+        except Exception as e:
+            logger.error(f"Erro durante limpeza: {e}", exc_info=True)
+        finally:
+            # Garantir que o cliente seja fechado
+            try:
+                await self.binance_client.close()
+                logger.info("Cliente Binance fechado.")
+            except Exception as e:
+                logger.error(f"Erro ao fechar cliente Binance: {e}")
+
 
     def _adjust_parameters_based_on_trend(
             self, trend_direction: str, trend_strength: str, trade_direction: str
