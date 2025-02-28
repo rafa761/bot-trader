@@ -325,12 +325,16 @@ class LSTMSignalGenerator(SignalGenerator):
                     elif ema_short < ema_long:
                         trend = "BAIXA"
 
-                # Log das condições de mercado
+                # Log das condições de mercado com formatação corrigida
+                rsi_log = f"{rsi_value:.2f}" if rsi_value is not None else "N/A"
+                macd_log = f"{macd_value:.6f}" if macd_value is not None else "N/A"
+                atr_pct_log = f"{atr_pct:.2f}%" if atr_pct is not None else "N/A"
+
                 logger.info(
                     f"Condições de mercado: Tendência={trend}, "
-                    f"RSI={rsi_value:.2f if rsi_value is not None else 'N/A'}, "
-                    f"MACD={macd_value:.6f if macd_value is not None else 'N/A'}, "
-                    f"ATR%={atr_pct:.2f if atr_pct is not None else 'N/A'}%"
+                    f"RSI={rsi_log}, "
+                    f"MACD={macd_log}, "
+                    f"ATR%={atr_pct_log}"
                 )
             except Exception as e:
                 logger.error(f"Erro ao registrar condições de mercado: {e}")

@@ -147,7 +147,8 @@ class BinanceClient:
             quantity: float,
             position_side: str,
             step_size: float,
-            max_attempts: int = 3
+            max_attempts: int = 3,
+            min_notional: float = 100.0
     ) -> dict[str, Any] | None:
         """
         Cria uma ordem MARKET com retentativas em caso de erro (ex.: margem insuficiente) de forma assíncrona.
@@ -160,6 +161,7 @@ class BinanceClient:
             position_side: "LONG" ou "SHORT"
             step_size: Valor de step size para arredondar a quantidade
             max_attempts: Número máximo de tentativas de enviar a ordem
+            min_notional: Valor mínimo notional requerido pela Binance (preço x quantidade)
 
         Returns:
             Optional[Dict[str, Any]]: Resposta da ordem (dict) ou None se falhar em todas as tentativas
@@ -171,6 +173,25 @@ class BinanceClient:
         order_resp = None
 
         formatted_qty = self.format_quantity_for_step_size(quantity, step_size)
+
+        # Obter o preço atual para verificar o valor notional
+        current_price = await self.get_futures_last_price(symbol)
+        notional_value = float(formatted_qty) * current_price
+
+        if notional_value < min_notional:
+            logger.warning(
+                f"Valor notional ({notional_value:.2f} USDT) abaixo do mínimo da Binance ({min_notional} USDT). "
+                f"Quantidade: {formatted_qty} {symbol}. Preço: {current_price} USDT"
+            )
+
+            # Tentar ajustar a quantidade para atingir o mínimo
+            min_qty = min_notional / current_price
+            formatted_min_qty = self.format_quantity_for_step_size(min_qty, step_size)
+
+            logger.info(
+                f"Tentando ajustar quantidade para {formatted_min_qty} {symbol} (valor: {float(formatted_min_qty) * current_price:.2f} USDT)")
+            formatted_qty = formatted_min_qty
+
         while attempt < max_attempts:
             try:
                 order_resp = await self.client.futures_create_order(
