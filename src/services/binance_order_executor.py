@@ -5,22 +5,22 @@ from typing import Any, Literal
 
 from core.config import settings
 from core.logger import logger
+from services.base.interfaces import IOrderExecutor
 from services.base.schemas import (
     TradingSignal,
     OrderResult,
     TPSLResult
 )
-from services.base.services import OrderExecutor
 from services.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
 
 
-class BinanceOrderExecutor(OrderExecutor):
+class BinanceOrderExecutor(IOrderExecutor):
     """
     Executor de ordens na Binance.
 
-    Implementa a interface OrderExecutor, sendo responsável por executar
+    Implementa a interface IOrderExecutor, sendo responsável por executar
     ordens, verificar posições e gerenciar ordens de TP/SL na Binance.
     """
 
@@ -51,6 +51,42 @@ class BinanceOrderExecutor(OrderExecutor):
         # Histórico de ordens executadas
         self.executed_orders: list[dict[str, Any]] = []
         self.max_order_history = 100
+
+    def get_executed_orders(self) -> list[dict[str, Any]]:
+        """
+        Retorna uma cópia da lista de ordens executadas.
+
+        Returns:
+            list: Lista de dicionários contendo informações das ordens executadas
+        """
+        return self.executed_orders.copy()
+
+    def mark_order_as_processed(self, order_id: str) -> bool:
+        """
+        Marca uma ordem como processada.
+
+        Args:
+            order_id: ID da ordem a ser marcada como processada
+
+        Returns:
+            bool: True se a ordem foi encontrada e marcada, False caso contrário
+        """
+        for order in self.executed_orders:
+            if order.get("order_id") == order_id:
+                order["processed"] = True
+                logger.info(f"Ordem {order_id} marcada como processada")
+                return True
+        logger.warning(f"Ordem {order_id} não encontrada para marcar como processada")
+        return False
+
+    async def get_unprocessed_orders(self) -> list[dict[str, Any]]:
+        """
+        Retorna uma lista com ordens que ainda não foram processadas.
+
+        Returns:
+            list: Lista de dicionários contendo ordens não processadas
+        """
+        return [order for order in self.executed_orders if not order.get("processed", False)]
 
     async def initialize_filters(self) -> None:
         """
