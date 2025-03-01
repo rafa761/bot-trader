@@ -64,11 +64,13 @@ class RiskRewardManager:
         """
         min_tp = sl_pct * self.min_rr_ratio
 
-        # Se o TP original for menor que o mínimo para a razão R:R desejada,
-        # ajusta para o mínimo
+        # Se o TP original for menor que o mínimo para a razão R:R desejada
         if tp_pct < min_tp:
-            logger.debug(f"Ajustando TP: {tp_pct:.2f}% -> {min_tp:.2f}% para garantir R:R mínimo")
-            return min_tp
+            # Limitar o ajuste a no máximo 3x o valor original
+            adjustment_limit = tp_pct * 3.0
+            adjusted_tp = min(min_tp, adjustment_limit)
+            logger.info(f"Ajustando TP: {tp_pct:.2f}% -> {adjusted_tp:.2f}% para garantir R:R mínimo")
+            return adjusted_tp
 
         return tp_pct
 
