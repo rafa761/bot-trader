@@ -274,7 +274,7 @@ class TradingBot:
             signal.mtf_details = details["tf_summary"]
 
             # Verificar se o alinhamento é suficiente para executar o trade
-            MIN_MTF_ALIGNMENT = 0.4  # Mínimo alinhamento para prosseguir
+            MIN_MTF_ALIGNMENT = 0.3  # Mínimo alinhamento para prosseguir
             should_proceed = alignment_score >= MIN_MTF_ALIGNMENT
 
             if not should_proceed:
