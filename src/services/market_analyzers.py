@@ -1,7 +1,5 @@
 # services/market_analyzers.py
 
-from typing import Tuple
-
 from core.config import settings
 from core.logger import logger
 from services.base.schemas import TradingSignal
@@ -23,15 +21,17 @@ class MarketTrendAnalyzer:
         self.default_sl_adjustment = 1.0
 
     def adjust_parameters(
-            self, trend_direction: str, trend_strength: str, trade_direction: str
+            self, trend_direction: str, trend_strength: str, trade_direction: str,
+            mtf_trend: str = None
     ) -> tuple[float, float, float]:
         """
-        Ajusta os parâmetros de trading baseado na tendência atual.
+        Ajusta os parâmetros de trading baseado na tendência atual e análise multi-timeframe.
 
         Args:
             trend_direction: Direção da tendência ("UPTREND", "DOWNTREND", "NEUTRAL")
             trend_strength: Força da tendência ("STRONG_TREND", "WEAK_TREND")
             trade_direction: Direção do trade ("LONG", "SHORT")
+            mtf_trend: Tendência multi-timeframe (opcional)
 
         Returns:
             tuple: (entry_threshold, tp_adjustment_factor, sl_adjustment_factor)
@@ -86,7 +86,40 @@ class MarketTrendAnalyzer:
             entry_threshold = settings.ENTRY_THRESHOLD_RANGE
             tp_adjustment = settings.TP_ADJUSTMENT_RANGE
             sl_adjustment = settings.SL_ADJUSTMENT_RANGE
-            logger.info(f"Mercado NEUTRO: ajustando parâmetros para operação em range")
+            logger.info(f"Mercado NEUTRAL: ajustando parâmetros para operação em range")
+
+        # Ajustar baseado na análise multi-timeframe
+        if mtf_trend:
+            # Analisar tendência multi-timeframe
+            is_strong_mtf_up = mtf_trend in ["STRONG_UPTREND", "MODERATE_UPTREND"]
+            is_strong_mtf_down = mtf_trend in ["STRONG_DOWNTREND", "MODERATE_DOWNTREND"]
+
+            if is_strong_mtf_up:
+                if trade_direction == "LONG":
+                    # LONG em tendência de alta forte multi-timeframe
+                    entry_threshold *= 0.8  # Reduzir threshold (mais fácil entrar)
+                    tp_adjustment *= 1.3  # Aumentar TP em mais 30%
+                    logger.info(f"LONG alinhado com tendência MTF FORTE de ALTA: threshold reduzido, TP mais agressivo")
+                else:  # SHORT
+                    # SHORT contra tendência de alta forte multi-timeframe
+                    entry_threshold *= 1.4  # Aumentar threshold (mais difícil entrar)
+                    tp_adjustment *= 0.7  # Reduzir TP drasticamente
+                    sl_adjustment *= 0.6  # Reduzir SL drasticamente (mais próximo)
+                    logger.info(f"SHORT contra tendência MTF FORTE de ALTA: threshold muito aumentado, alvos reduzidos")
+
+            elif is_strong_mtf_down:
+                if trade_direction == "SHORT":
+                    # SHORT em tendência de baixa forte multi-timeframe
+                    entry_threshold *= 0.8  # Reduzir threshold (mais fácil entrar)
+                    tp_adjustment *= 1.3  # Aumentar TP em mais 30%
+                    logger.info(
+                        f"SHORT alinhado com tendência MTF FORTE de BAIXA: threshold reduzido, TP mais agressivo")
+                else:  # LONG
+                    # LONG contra tendência de baixa forte multi-timeframe
+                    entry_threshold *= 1.4  # Aumentar threshold (mais difícil entrar)
+                    tp_adjustment *= 0.7  # Reduzir TP drasticamente
+                    sl_adjustment *= 0.6  # Reduzir SL drasticamente (mais próximo)
+                    logger.info(f"LONG contra tendência MTF FORTE de BAIXA: threshold muito aumentado, alvos reduzidos")
 
         return entry_threshold, tp_adjustment, sl_adjustment
 
@@ -185,7 +218,8 @@ class MarketTrendAnalyzer:
         return signal
 
     def log_technical_analysis(
-            self, direction: str, trend_direction: str, entry_score: float, threshold: float
+            self, direction: str, trend_direction: str, entry_score: float, threshold: float,
+            mtf_trend: str = None
     ) -> None:
         """
         Registra informações de análise técnica no log.
@@ -195,11 +229,17 @@ class MarketTrendAnalyzer:
             trend_direction: Direção da tendência
             entry_score: Pontuação de qualidade da entrada
             threshold: Limiar para entrada
+            mtf_trend: Tendência multi-timeframe (opcional)
         """
-        logger.info(
+        log_msg = (
             f"Análise Técnica: "
             f"Direção={direction}, "
             f"Tendência={trend_direction}, "
             f"Score de Entrada={entry_score:.2f}, "
             f"Threshold Ajustado={threshold:.2f}"
         )
+
+        if mtf_trend:
+            log_msg += f", MTF Trend={mtf_trend}"
+
+        logger.info(log_msg)

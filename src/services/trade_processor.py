@@ -1,12 +1,12 @@
 # services/trade_processor.py
 
 import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from core.config import settings
 from core.logger import logger
+from services.base.services import SignalGenerator
 from services.binance_client import BinanceClient
-from services.lstm_signal_generator import LSTMSignalGenerator
 from services.performance_monitor import TradePerformanceMonitor
 
 
@@ -22,7 +22,7 @@ class TradeProcessor:
     def __init__(
             self,
             binance_client: BinanceClient,
-            signal_generator: LSTMSignalGenerator,
+            signal_generator: SignalGenerator,
             performance_monitor: TradePerformanceMonitor | None = None
     ):
         """

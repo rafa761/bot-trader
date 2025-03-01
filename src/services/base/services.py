@@ -4,6 +4,9 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
+from services.base.schemas import OrderResult
+from services.base.schemas import TradingSignal
+
 
 class MarketDataProvider(ABC):
     """Interface para provedores de dados de mercado."""
@@ -28,7 +31,7 @@ class SignalGenerator(ABC):
     """Interface para geradores de sinais de trading."""
 
     @abstractmethod
-    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> dict | None:
+    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> TradingSignal | None:
         """Gera um sinal de trading baseado nos dados fornecidos."""
         pass
 
@@ -42,6 +45,6 @@ class OrderExecutor(ABC):
         pass
 
     @abstractmethod
-    async def execute_order(self, signal: dict) -> bool:
+    async def execute_order(self, signal: TradingSignal) -> OrderResult:
         """Executa uma ordem baseada no sinal fornecido."""
         pass

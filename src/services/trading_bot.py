@@ -16,7 +16,7 @@ from services.model_retrainer import ModelRetrainer
 from services.performance_monitor import TradePerformanceMonitor
 from services.trade_processor import TradeProcessor
 from services.trading_strategy import TradingStrategy
-from services.trend_analyzer import TrendAnalyzer
+from services.trend_analyzer import TrendAnalyzer, MultiTimeFrameTrendAnalyzer
 
 
 class TradingBot:
@@ -45,6 +45,10 @@ class TradingBot:
         self.performance_monitor = TradePerformanceMonitor()
         self.strategy = TradingStrategy()
 
+        # Analisador de tendências de mercado
+        self.market_analyzer = MarketTrendAnalyzer()
+        self.multi_tf_analyzer = None  # Será inicializado no método initialize()
+
         # Implementações SOLID com interfaces
         from services.binance_data_provider import BinanceDataProvider
         from services.lstm_signal_generator import LSTMSignalGenerator
@@ -68,9 +72,6 @@ class TradingBot:
             strategy=self.strategy,
             performance_monitor=self.performance_monitor
         )
-
-        # Analisador de tendências de mercado
-        self.market_analyzer = MarketTrendAnalyzer()
 
         # Processador de trades
         self.trade_processor = TradeProcessor(
@@ -129,6 +130,12 @@ class TradingBot:
         await self.data_provider.initialize()
         await self.order_executor.initialize_filters()
 
+        # Inicializar analisador multi-timeframe
+        self.multi_tf_analyzer = MultiTimeFrameTrendAnalyzer(
+            binance_client=self.binance_client,
+            symbol=settings.SYMBOL
+        )
+
         # Iniciar o sistema de retreinamento
         self.model_retrainer.start()
 
@@ -180,7 +187,7 @@ class TradingBot:
             logger.error(f"Erro ao verificar atualizações de modelo: {e}", exc_info=True)
 
     async def _log_system_summary(self) -> None:
-        """Log do resumo do sistema."""
+        """Log do resumo do sistema com informações multi-timeframe."""
         logger.info("=" * 50)
         logger.info(f"RESUMO DO SISTEMA - Ciclo {self.cycle_count}")
         logger.info(f"Símbolo: {settings.SYMBOL}, Interval: {settings.INTERVAL}")
@@ -190,9 +197,26 @@ class TradingBot:
             f"Últimos candles processados: {len(self.data_handler.historical_df) if self.data_handler.historical_df is not None else 0}"
         )
 
+        # Adicionar análise multi-timeframe
+        try:
+            mtf_trend, confidence, details = await self.multi_tf_analyzer.analyze_multi_timeframe_trend()
+            logger.info("-" * 30)
+            logger.info("ANÁLISE MULTI-TIMEFRAME")
+            logger.info(f"Tendência Consolidada: {mtf_trend}")
+            logger.info(f"Confiança: {confidence:.2f}%")
+
+            # Tendência por timeframe
+            logger.info("Tendências por timeframe:")
+            for tf, info in details["tf_summary"].items():
+                logger.info(f"  {tf}: {info['strength']} (score: {info['score']:.2f})")
+        except Exception as e:
+            logger.error(f"Erro ao mostrar análise multi-timeframe: {e}")
+
         # Adicionar informações sobre o retreinamento
         retraining_status = self.model_retrainer.get_retraining_status()
-        logger.info(f"Retreinamento: {'Em andamento' if retraining_status['retraining_in_progress'] else 'Inativo'}")
+        logger.info("-" * 30)
+        logger.info("STATUS DO RETREINAMENTO")
+        logger.info(f"Status: {'Em andamento' if retraining_status['retraining_in_progress'] else 'Inativo'}")
         logger.info(f"Último retreinamento: {retraining_status['last_retraining_time']}")
         logger.info(f"Horas desde último retreinamento: {retraining_status['hours_since_last_retraining']:.1f}")
         logger.info(f"Versão TP/SL: {retraining_status['tp_model_version']}/{retraining_status['sl_model_version']}")
@@ -219,9 +243,64 @@ class TradingBot:
 
         logger.info("=" * 50)
 
+    async def add_multi_timeframe_analysis(self, signal, df):
+        """
+        Adiciona análise multi-timeframe ao sinal de trading.
+
+        Args:
+            signal: Sinal de trading gerado
+            df: DataFrame do timeframe atual
+
+        Returns:
+            Sinal enriquecido com análise multi-timeframe e booleano indicando se deve prosseguir
+        """
+        if not signal:
+            return None, False
+
+        try:
+            # Executar análise multi-timeframe
+            mtf_trend, confidence, details = await self.multi_tf_analyzer.analyze_multi_timeframe_trend()
+
+            # Verificar alinhamento do sinal com a tendência multi-timeframe
+            trade_direction = signal.direction
+            alignment_score, confidence = await self.multi_tf_analyzer.get_trend_alignment(trade_direction)
+
+            # Adicionar informações ao sinal
+            signal.mtf_trend = mtf_trend
+            signal.mtf_alignment = alignment_score
+            signal.mtf_confidence = confidence
+            signal.mtf_details = details["tf_summary"]
+
+            # Verificar se o alinhamento é suficiente para executar o trade
+            MIN_MTF_ALIGNMENT = 0.4  # Mínimo alinhamento para prosseguir
+            should_proceed = alignment_score >= MIN_MTF_ALIGNMENT
+
+            if not should_proceed:
+                logger.info(
+                    f"Sinal {trade_direction} rejeitado - Baixo alinhamento multi-timeframe: "
+                    f"{alignment_score:.2f} < {MIN_MTF_ALIGNMENT}"
+                )
+            else:
+                logger.info(
+                    f"Análise multi-timeframe para sinal {trade_direction}: "
+                    f"Tendência MTF={mtf_trend}, Alinhamento={alignment_score:.2f}, "
+                    f"Confiança={confidence:.2f}"
+                )
+
+                # Logar detalhes dos timeframes para análise
+                for tf, info in details["tf_summary"].items():
+                    logger.info(f"  Timeframe {tf}: {info['strength']}, Score: {info['score']:.2f}")
+
+            return signal, should_proceed
+
+        except Exception as e:
+            logger.error(f"Erro na análise multi-timeframe: {e}", exc_info=True)
+            # Em caso de erro, prosseguir normalmente sem a análise MTF
+            return signal, True
+
     async def run(self) -> None:
         """
-        Método principal do bot, refatorado para seguir os princípios SOLID.
+        Método principal do bot, refatorado para incluir análise multi-timeframe.
         Coordena os componentes sem conter lógica de negócio diretamente.
         """
         try:
@@ -276,29 +355,44 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 5. Analisar tendência de mercado
+                # 5. Executar análise multi-timeframe e verificar alinhamento
+                signal, mtf_proceed = await self.add_multi_timeframe_analysis(signal, df)
+                if not mtf_proceed:
+                    logger.info("Sinal rejeitado pela análise multi-timeframe.")
+                    await asyncio.sleep(5)
+                    continue
+
+                # 6. Analisar tendência de mercado
                 trend_direction = TrendAnalyzer.ema_trend(df)
                 trend_strength = TrendAnalyzer.adx_trend(df)
 
-                # 6. Ajustar parâmetros baseados na análise de mercado
+                # 7. Ajustar parâmetros baseados na análise de mercado (incluindo MTF)
                 entry_threshold, tp_adjustment, sl_adjustment = self.market_analyzer.adjust_parameters(
-                    trend_direction, trend_strength, signal.direction
+                    trend_direction,
+                    trend_strength,
+                    signal.direction,
+                    mtf_trend=signal.mtf_trend if hasattr(signal, 'mtf_trend') else None
                 )
 
-                # 7. Avaliar qualidade da entrada
+                # 8. Avaliar qualidade da entrada
                 should_enter, entry_score = self.strategy.evaluate_entry_quality(
                     df,
                     signal.current_price,
                     signal.direction,
                     predicted_tp_pct=signal.predicted_tp_pct,
                     predicted_sl_pct=signal.predicted_sl_pct,
-                    entry_threshold=entry_threshold
+                    entry_threshold=entry_threshold,
+                    mtf_alignment=signal.mtf_alignment if hasattr(signal, 'mtf_alignment') else None
                 )
 
                 # Log de análise técnica
                 if signal.direction and trend_direction and entry_score is not None:
                     self.market_analyzer.log_technical_analysis(
-                        signal.direction, trend_direction, entry_score, entry_threshold
+                        signal.direction,
+                        trend_direction,
+                        entry_score,
+                        entry_threshold,
+                        mtf_trend=signal.mtf_trend if hasattr(signal, 'mtf_trend') else None
                     )
 
                 if not should_enter:
@@ -309,12 +403,12 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 8. Ajustar TP/SL baseado na tendência
+                # 9. Ajustar TP/SL baseado na tendência
                 signal = self.market_analyzer.adjust_signal_parameters(
                     signal, tp_adjustment, sl_adjustment
                 )
 
-                # 9. Executar ordem
+                # 10. Executar ordem
                 order_result = await self.order_executor.execute_order(signal)
                 if not order_result.success:
                     logger.warning(f"Falha na execução da ordem: {order_result.error_message}")
