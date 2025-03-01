@@ -241,6 +241,8 @@ class TradingStrategy:
                 trend_direction=trend
             ) * volatility_factor  # Aplicar fator de volatilidade
 
+        quality_score = min(quality_score, 1.0)
+
         # Decidir se deve entrar no trade
         should_enter = quality_score >= entry_threshold
 
