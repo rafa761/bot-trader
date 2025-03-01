@@ -17,7 +17,8 @@ from services.model_retrainer import ModelRetrainer
 from services.performance_monitor import TradePerformanceMonitor
 from services.trade_processor import TradeProcessor
 from services.trading_strategy import TradingStrategy
-from services.trend_analyzer import TrendAnalyzer, MultiTimeFrameTrendAnalyzer
+from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
+from strategies.strategy_manager import StrategyManager
 
 
 class TradingBot:
@@ -92,6 +93,12 @@ class TradingBot:
             min_data_points=1000,
             performance_threshold=0.15
         )
+
+        # Gerenciador de estratégias centralizado
+        self.strategy_manager = StrategyManager()
+
+        # Estratégia atual (mantido para compatibilidade com os logs)
+        self.current_strategy_name = "Não definida"
 
         # Manipulador de limpeza para interrupções
         self.cleanup_handler = CleanupHandler(self.binance_client, settings.SYMBOL)
@@ -243,6 +250,18 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro ao incluir métricas de performance no resumo: {e}")
 
+        # Adicionar informações sobre a estratégia atual
+        logger.info(f"Estratégia atual: {self.current_strategy_name}")
+        if hasattr(self, 'strategy_manager'):
+            strategy_details = self.strategy_manager.get_strategy_details()
+            if strategy_details['active']:
+                config = strategy_details['config']
+                logger.info(f"Configuração da estratégia: "
+                            f"TP ajuste={config.get('tp_adjustment', 1.0)}, "
+                            f"SL ajuste={config.get('sl_adjustment', 1.0)}")
+                logger.info(
+                    f"Min R:R={config.get('min_rr_ratio', 1.5)}, Threshold={config.get('entry_threshold', 0.6)}")
+
         logger.info("=" * 50)
 
     async def add_multi_timeframe_analysis(self, signal, df):
@@ -308,6 +327,12 @@ class TradingBot:
         try:
             await self.initialize()
 
+            # Inicializar o gerenciador de estratégias (se não foi feito no __init__)
+            if not hasattr(self, 'strategy_manager'):
+                from strategies.strategy_manager import StrategyManager
+                self.strategy_manager = StrategyManager()
+                logger.info("Gerenciador de estratégias inicializado")
+
             while True:
                 self.cycle_count += 1
                 logger.debug(f"Iniciando ciclo {self.cycle_count}")
@@ -351,66 +376,30 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 4. Gerar sinal de trading
+                # 4. Processar análise de mercado UNIFICADA com o gerenciador de estratégias
+                market_analysis = await self.strategy_manager.process_market_data(df, self.multi_tf_analyzer)
+
+                # Atualizar a estratégia atual para o resumo do sistema
+                self.current_strategy_name = market_analysis.get("strategy_name", "Não definida")
+
+                # 5. Gerar sinal de trading (isso não mudou)
                 signal = await self.signal_generator.generate_signal(df, current_price)
                 if not signal:
                     await asyncio.sleep(5)
                     continue
 
-                # 5. Executar análise multi-timeframe e verificar alinhamento
-                signal, mtf_proceed = await self.add_multi_timeframe_analysis(signal, df)
-                if not mtf_proceed:
-                    logger.info("Sinal rejeitado pela análise multi-timeframe.")
+                # 6. Avaliar e ajustar o sinal usando o gerenciador de estratégias
+                signal, should_execute = await self.strategy_manager.evaluate_signal(
+                    signal, df, self.multi_tf_analyzer
+                )
+
+                # Se o sinal não for aprovado, continuar para o próximo ciclo
+                if not should_execute:
+                    logger.info("Sinal rejeitado pelo gerenciador de estratégias.")
                     await asyncio.sleep(5)
                     continue
 
-                # 6. Analisar tendência de mercado
-                trend_direction = TrendAnalyzer.ema_trend(df)
-                trend_strength = TrendAnalyzer.adx_trend(df)
-
-                # 7. Ajustar parâmetros baseados na análise de mercado (incluindo MTF)
-                entry_threshold, tp_adjustment, sl_adjustment = self.market_analyzer.adjust_parameters(
-                    trend_direction,
-                    trend_strength,
-                    signal.direction,
-                    mtf_trend=signal.mtf_trend if hasattr(signal, 'mtf_trend') else None
-                )
-
-                # 8. Avaliar qualidade da entrada
-                should_enter, entry_score = self.strategy.evaluate_entry_quality(
-                    df,
-                    signal.current_price,
-                    signal.direction,
-                    predicted_tp_pct=signal.predicted_tp_pct,
-                    predicted_sl_pct=signal.predicted_sl_pct,
-                    entry_threshold=entry_threshold,
-                    mtf_alignment=signal.mtf_alignment if hasattr(signal, 'mtf_alignment') else None
-                )
-
-                # Log de análise técnica
-                if signal.direction and trend_direction and entry_score is not None:
-                    self.market_analyzer.log_technical_analysis(
-                        signal.direction,
-                        trend_direction,
-                        entry_score,
-                        entry_threshold,
-                        mtf_trend=signal.mtf_trend if hasattr(signal, 'mtf_trend') else None
-                    )
-
-                if not should_enter:
-                    logger.info(
-                        f"Sinal {signal.direction} gerado, mas condições de mercado não favoráveis. "
-                        f"Score: {entry_score:.2f} < {entry_threshold:.2f}"
-                    )
-                    await asyncio.sleep(5)
-                    continue
-
-                # 9. Ajustar TP/SL baseado na tendência
-                signal = self.market_analyzer.adjust_signal_parameters(
-                    signal, tp_adjustment, sl_adjustment
-                )
-
-                # 10. Executar ordem
+                # 7. Executar ordem (só chegamos aqui se o sinal foi aprovado)
                 order_result = await self.order_executor.execute_order(signal)
                 if not order_result.success:
                     logger.warning(f"Falha na execução da ordem: {order_result.error_message}")
