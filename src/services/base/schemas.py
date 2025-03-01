@@ -1,6 +1,6 @@
 # services/base/schemas.py
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,10 @@ class TradingSignal(BaseModel):
     current_price: float = Field(..., gt=0, description="Preço atual do ativo")
     tp_factor: float = Field(..., gt=0, description="Fator multiplicador para take profit")
     sl_factor: float = Field(..., gt=0, description="Fator multiplicador para stop loss")
+    mtf_trend: str | None = Field(None, description="Tendência consolidada multi-timeframe")
+    mtf_alignment: float | None = Field(None, ge=0.0, le=1.0, description="Score de alinhamento multi-timeframe")
+    mtf_confidence: float | None = Field(None, ge=0.0, le=1.0, description="Confiança na análise multi-timeframe")
+    mtf_details: dict[str, Any] | None = Field(None, description="Detalhes da análise multi-timeframe por timeframe")
     atr_value: float | None = Field(None, description="Valor atual do ATR, se disponível")
     entry_score: float | None = Field(None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
     rr_ratio: float | None = Field(None, gt=0, description="Razão risco/recompensa calculada")

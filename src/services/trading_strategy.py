@@ -170,7 +170,8 @@ class TradingStrategy:
             trade_direction: str,
             predicted_tp_pct: float = None,
             predicted_sl_pct: float = None,
-            entry_threshold: float = settings.ENTRY_THRESHOLD_DEFAULT
+            entry_threshold: float = settings.ENTRY_THRESHOLD_DEFAULT,
+            mtf_alignment: float = None
     ) -> tuple[bool, float]:
         """
         Avalia a qualidade da entrada potencial usando múltiplos critérios.
@@ -182,6 +183,7 @@ class TradingStrategy:
             predicted_tp_pct: Take profit percentual previsto (opcional)
             predicted_sl_pct: Stop loss percentual previsto (opcional)
             entry_threshold: Pontuação mínima para considerar a entrada
+            mtf_alignment: Score de alinhamento multi-timeframe (0-1)
 
         Returns:
             tuple[bool, float]: (Deve entrar, pontuação da entrada)
@@ -210,7 +212,6 @@ class TradingStrategy:
             trend_alignment = min(1.0, trend_alignment)  # Limitar a 1.0
 
         # Utilizar current_price para cálculos relativos à volatilidade
-        # Por exemplo, para determinar se o preço atual está próximo a suportes/resistências
         atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
         volatility_factor = 1.0
 
@@ -241,27 +242,48 @@ class TradingStrategy:
                 trend_direction=trend
             ) * volatility_factor  # Aplicar fator de volatilidade
 
+        # Se temos alinhamento multi-timeframe, incorporá-lo na avaliação
+        if mtf_alignment is not None:
+            # Ponderar qualidade atual (60%) e alinhamento MTF (40%)
+            mtf_weighted_score = quality_score * 0.6 + mtf_alignment * 0.4
+
+            # Aplicar algum boost se o alinhamento for muito forte
+            if mtf_alignment > 0.8:
+                mtf_weighted_score = min(1.0, mtf_weighted_score * 1.2)  # Boost de 20% com limite de 1.0
+
+            # Log para comparar scores
+            logger.info(
+                f"Score original: {quality_score:.2f}, MTF alinhamento: {mtf_alignment:.2f}, "
+                f"Score ponderado: {mtf_weighted_score:.2f}"
+            )
+
+            # Usar o score ponderado com MTF
+            quality_score = mtf_weighted_score
+
+        quality_score = min(quality_score, 1.0)
+
         # Decidir se deve entrar no trade
         should_enter = quality_score >= entry_threshold
 
         # Logar avaliação detalhada
+        log_msg = []
+        log_msg.append(f"Avaliação de Entrada: Direção={trade_direction}, Tendência={trend}")
+        log_msg.append(f"ADX={adx_value:.1f}, Alinhamento={trend_alignment:.2f}")
+
         if predicted_tp_pct is not None and predicted_sl_pct is not None:
-            logger.info(
-                f"Avaliação de Entrada: Direção={trade_direction}, Tendência={trend}, "
-                f"ADX={adx_value:.1f}, Alinhamento={trend_alignment:.2f}, "
-                f"TP={predicted_tp_pct:.2f}%, SL={predicted_sl_pct:.2f}%, "
-                f"R:R={(predicted_tp_pct / predicted_sl_pct if predicted_sl_pct > 0 else 0):.2f}, "
-                f"Volatilidade={relative_volatility:.2f}%, Fator={volatility_factor:.1f}, "
-                f"Score={quality_score:.2f}, Threshold={entry_threshold:.2f}, "
-                f"Decisão={'Entrar' if should_enter else 'Ignorar'}"
-            )
-        else:
-            logger.info(
-                f"Avaliação de Entrada: Direção={trade_direction}, Tendência={trend}, "
-                f"ADX={adx_value:.1f}, Alinhamento={trend_alignment:.2f}, "
-                f"Volatilidade Relativa={relative_volatility:.2f}%, "
-                f"Score={quality_score:.2f}, Threshold={entry_threshold:.2f}, "
-                f"Decisão={'Entrar' if should_enter else 'Ignorar'}"
-            )
+            log_msg.append(f"TP={predicted_tp_pct:.2f}%, SL={predicted_sl_pct:.2f}%")
+            if predicted_sl_pct > 0:
+                log_msg.append(f"R:R={(predicted_tp_pct / predicted_sl_pct):.2f}")
+
+        if atr_value:
+            log_msg.append(f"Volatilidade={relative_volatility:.2f}%, Fator={volatility_factor:.1f}")
+
+        if mtf_alignment is not None:
+            log_msg.append(f"MTF={mtf_alignment:.2f}")
+
+        log_msg.append(f"Score={quality_score:.2f}, Threshold={entry_threshold:.2f}")
+        log_msg.append(f"Decisão={'Entrar' if should_enter else 'Ignorar'}")
+
+        logger.info(", ".join(log_msg))
 
         return should_enter, quality_score
