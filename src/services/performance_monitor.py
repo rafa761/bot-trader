@@ -6,7 +6,7 @@ import os
 import sqlite3
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from core.config import settings
 from core.logger import logger
+from services.base.interfaces import IPerformanceMonitor
 
 
 class TradeResult(str, Enum):
@@ -236,7 +237,7 @@ class PerformanceMetrics(BaseModel):
         return result
 
 
-class TradePerformanceMonitor:
+class TradePerformanceMonitor(IPerformanceMonitor):
     """
     Monitor de performance para análise e registro de trades.
 
@@ -780,6 +781,196 @@ class TradePerformanceMonitor:
         self._save_metrics_to_db()
 
         return self.metrics
+
+    def get_metrics(self) -> PerformanceMetrics:
+        """
+        Retorna as métricas atuais de performance.
+        Usado pelo dashboard para exibir informações atualizadas.
+
+        Returns:
+            PerformanceMetrics: Objeto com as métricas atuais
+        """
+        # Garante que as métricas estão atualizadas antes de retornar
+        self.calculate_metrics()
+        return self.metrics
+
+    def get_recent_trades(self, limit: int = 10) -> list[Trade]:
+        """
+        Retorna os trades mais recentes ordenados por data de entrada.
+
+        Args:
+            limit: Número máximo de trades a retornar
+
+        Returns:
+            list[Trade]: Lista de trades recentes
+        """
+        # Ordenar por timestamp de entrada (mais recente primeiro)
+        sorted_trades = sorted(
+            self.trades,
+            key=lambda t: t.entry_time if t.entry_time else datetime.datetime.min,
+            reverse=True
+        )
+        return sorted_trades[:limit]
+
+    def get_closed_trades(self) -> list[Trade]:
+        """
+        Retorna apenas os trades já fechados.
+
+        Returns:
+            list[Trade]: Lista de trades fechados
+        """
+        return [t for t in self.trades if t.status == TradeStatus.CLOSED]
+
+    def get_open_positions_summary(self) -> dict[str, Any]:
+        """
+        Retorna um resumo das posições atualmente abertas.
+
+        Returns:
+            dict: Resumo das posições abertas com valores de entrada, alvos e duração
+        """
+        open_trades = [t for t in self.trades if t.status == TradeStatus.OPEN]
+
+        if not open_trades:
+            return {"count": 0, "trades": []}
+
+        summary = {
+            "count": len(open_trades),
+            "trades": []
+        }
+
+        current_time = datetime.datetime.now()
+
+        for trade in open_trades:
+            # Calcular duração desde a entrada
+            duration_seconds = (current_time - trade.entry_time).total_seconds() if trade.entry_time else 0
+            duration_minutes = duration_seconds / 60
+
+            trade_summary = {
+                "trade_id": trade.trade_id,
+                "signal_id": trade.signal_id,
+                "direction": trade.direction,
+                "entry_price": trade.entry_price,
+                "tp_target_price": trade.tp_target_price,
+                "sl_target_price": trade.sl_target_price,
+                "entry_time": trade.entry_time.isoformat() if trade.entry_time else None,
+                "duration_minutes": round(duration_minutes, 1),
+                "quantity": trade.quantity,
+                "leverage": trade.leverage,
+                "symbol": trade.symbol
+            }
+
+            summary["trades"].append(trade_summary)
+
+        return summary
+
+    def export_trade_history(self, format: str = "csv") -> str:
+        """
+        Exporta o histórico de trades para um formato específico (CSV, JSON).
+
+        Args:
+            format: Formato de exportação ("csv" ou "json")
+
+        Returns:
+            str: Dados exportados no formato solicitado
+        """
+        import io
+
+        # Criar DataFrame de trades
+        df = self.get_trades_dataframe()
+
+        if df.empty:
+            return "Sem dados para exportar"
+
+        if format.lower() == "csv":
+            output = io.StringIO()
+            df.to_csv(output, index=False)
+            return output.getvalue()
+        elif format.lower() == "json":
+            return df.to_json(orient="records")
+        else:
+            return "Formato não suportado"
+
+    def get_weekly_stats(self) -> dict[str, Any]:
+        """
+        Calcula estatísticas detalhadas para a semana atual.
+
+        Returns:
+            dict: Estatísticas semanais detalhadas
+        """
+        # Obter data de início da semana atual (segunda-feira)
+        today = datetime.datetime.now()
+        start_of_week = today - datetime.timedelta(days=today.weekday())
+        start_of_week = datetime.datetime(start_of_week.year, start_of_week.month, start_of_week.day)
+
+        # Filtrar trades da semana
+        weekly_trades = [
+            t for t in self.trades
+            if t.status == TradeStatus.CLOSED and t.exit_time and t.exit_time >= start_of_week
+        ]
+
+        # Se não houver trades, retornar estatísticas vazias
+        if not weekly_trades:
+            return {
+                "period": f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
+                "total_trades": 0,
+                "winning_trades": 0,
+                "win_rate": 0,
+                "total_pnl": 0.0,
+                "pnl_per_day": []
+            }
+
+        # Calcular estatísticas básicas
+        winning_trades = sum(1 for t in weekly_trades if t.result == TradeResult.WIN)
+        total_trades = len(weekly_trades)
+        win_rate = winning_trades / total_trades if total_trades > 0 else 0
+        total_pnl = sum(t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None)
+
+        # Calcular o P&L por dia da semana
+        days = [(start_of_week + datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+        pnl_per_day = []
+
+        for day_str in days:
+            day_date = datetime.datetime.strptime(day_str, '%Y-%m-%d')
+            next_day = day_date + datetime.timedelta(days=1)
+
+            # Filtrar trades deste dia
+            day_trades = [
+                t for t in weekly_trades
+                if t.exit_time and day_date <= t.exit_time < next_day
+            ]
+
+            day_pnl = sum(t.profit_loss_absolute for t in day_trades if t.profit_loss_absolute is not None)
+            day_count = len(day_trades)
+            day_win = sum(1 for t in day_trades if t.result == TradeResult.WIN)
+            day_win_rate = day_win / day_count if day_count > 0 else 0
+
+            pnl_per_day.append({
+                "date": day_str,
+                "day": day_date.strftime('%a'),
+                "pnl": day_pnl,
+                "trade_count": day_count,
+                "win_rate": day_win_rate
+            })
+
+        # Organizar resultados
+        result = {
+            "period": f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate": win_rate,
+            "total_pnl": total_pnl,
+            "pnl_per_day": pnl_per_day,
+            "best_trade": max(
+                (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
+                default=0
+            ),
+            "worst_trade": min(
+                (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
+                default=0
+            )
+        }
+
+        return result
 
     def _save_metrics_to_db(self) -> None:
         """Salva as métricas atuais no banco de dados."""

@@ -7,8 +7,9 @@ import numpy as np
 from core.config import settings
 from core.logger import logger
 from models.lstm.model import LSTMModel
+from services.base.interfaces import IOrderExecutor, IPerformanceMonitor
 # Importando as classes extraídas
-from services.base.services import MarketDataProvider, SignalGenerator, OrderExecutor
+from services.base.services import MarketDataProvider, SignalGenerator
 from services.binance_client import BinanceClient
 from services.cleanup_handler import CleanupHandler
 from services.market_analyzers import MarketTrendAnalyzer
@@ -42,7 +43,7 @@ class TradingBot:
         # Componentes do sistema
         from repositories.data_handler import DataHandler
         self.data_handler = DataHandler(self.binance_client)
-        self.performance_monitor = TradePerformanceMonitor()
+        self.performance_monitor: IPerformanceMonitor = TradePerformanceMonitor()
         self.strategy = TradingStrategy()
 
         # Analisador de tendências de mercado
@@ -67,17 +68,18 @@ class TradingBot:
             sequence_length=24
         )
 
-        self.order_executor: OrderExecutor = BinanceOrderExecutor(
+        self.order_executor: IOrderExecutor = BinanceOrderExecutor(
             binance_client=self.binance_client,
             strategy=self.strategy,
             performance_monitor=self.performance_monitor
         )
 
-        # Processador de trades
+        # Processador de trades - Corrigido para receber o order_executor
         self.trade_processor = TradeProcessor(
             binance_client=self.binance_client,
             signal_generator=self.signal_generator,
-            performance_monitor=self.performance_monitor
+            performance_monitor=self.performance_monitor,
+            order_executor=self.order_executor
         )
 
         # Sistema de retreinamento com referência para o signal_generator
@@ -272,7 +274,7 @@ class TradingBot:
             signal.mtf_details = details["tf_summary"]
 
             # Verificar se o alinhamento é suficiente para executar o trade
-            MIN_MTF_ALIGNMENT = 0.4  # Mínimo alinhamento para prosseguir
+            MIN_MTF_ALIGNMENT = 0.3  # Mínimo alinhamento para prosseguir
             should_proceed = alignment_score >= MIN_MTF_ALIGNMENT
 
             if not should_proceed:

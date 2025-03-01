@@ -5,12 +5,13 @@ from typing import Dict, Any
 
 from core.config import settings
 from core.logger import logger
+from services.base.interfaces import ITradeProcessor, IOrderExecutor
 from services.base.services import SignalGenerator
 from services.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
 
 
-class TradeProcessor:
+class TradeProcessor(ITradeProcessor):
     """
     Processador de trades completados.
 
@@ -23,7 +24,8 @@ class TradeProcessor:
             self,
             binance_client: BinanceClient,
             signal_generator: SignalGenerator,
-            performance_monitor: TradePerformanceMonitor | None = None
+            performance_monitor: TradePerformanceMonitor | None = None,
+            order_executor: IOrderExecutor = None
     ):
         """
         Inicializa o processador de trades.
@@ -32,10 +34,12 @@ class TradeProcessor:
             binance_client: Cliente da Binance para consulta de trades
             signal_generator: Gerador de sinais para registrar resultados reais
             performance_monitor: Monitor de performance para atualizar métricas
+            order_executor: Executor de ordens para acessar as ordens executadas
         """
         self.client = binance_client
         self.signal_generator = signal_generator
         self.performance_monitor = performance_monitor
+        self.order_executor = order_executor  # Armazenar referência direta ao executor
 
     async def _check_order_status(self, order_id: str) -> bool:
         """
@@ -223,15 +227,14 @@ class TradeProcessor:
         o sistema de retreinamento e monitor de performance com dados reais.
         """
         try:
-            # Obter ordens executadas que não foram processadas do executor
-            # Vamos supor que ordem_executor tem um atributo executed_orders para acessar o histórico de ordens
-            if not hasattr(self.signal_generator, "order_executor"):
-                # Neste caso, assumimos que o executor está em outro lugar
-                # Será necessário implementar uma maneira de acessar essas ordens
-                # Por enquanto, skip
+            # Verificar se temos acesso ao executor de ordens
+            if not self.order_executor:
+                logger.warning(
+                    "TradeProcessor não tem acesso ao executor de ordens. Ignorando processamento de trades.")
                 return
 
-            executed_orders = getattr(self.signal_generator, "order_executor", {}).executed_orders or []
+            # Obter ordens executadas que não foram processadas
+            executed_orders = self.order_executor.get_executed_orders()
 
             for order in executed_orders:
                 if order.get("processed", False):
@@ -280,18 +283,25 @@ class TradeProcessor:
                             actual_tp_pct = trade_result["actual_tp_pct"]
                             predicted_tp_pct = order.get("predicted_tp_pct", 0)
 
-                            # Usar None como placeholder para retrainer
-                            # O verdadeiro retrainer seria injetado pelo TradingBot
-                            self.signal_generator.record_actual_values(signal_id, actual_tp_pct, 0, None)
+                            # Verificar se o signal_generator tem o método para registrar valores reais
+                            if hasattr(self.signal_generator, "record_actual_values"):
+                                self.signal_generator.record_actual_values(signal_id, actual_tp_pct, 0, None)
+                            else:
+                                logger.warning("SignalGenerator não possui método record_actual_values")
 
                         elif result_type == "SL":
                             actual_sl_pct = trade_result["actual_sl_pct"]
                             predicted_sl_pct = order.get("predicted_sl_pct", 0)
 
-                            self.signal_generator.record_actual_values(signal_id, 0, actual_sl_pct, None)
+                            # Verificar se o signal_generator tem o método para registrar valores reais
+                            if hasattr(self.signal_generator, "record_actual_values"):
+                                self.signal_generator.record_actual_values(signal_id, 0, actual_sl_pct, None)
+                            else:
+                                logger.warning("SignalGenerator não possui método record_actual_values")
 
                         # Marcar ordem como processada
-                        order["processed"] = True
+                        self.order_executor.mark_order_as_processed(order_id)
+                        logger.info(f"Ordem {order_id} marcada como processada")
 
                     else:
                         logger.warning(f"Não foi possível obter resultados reais para o trade {signal_id}")
