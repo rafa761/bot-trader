@@ -5,6 +5,7 @@ import math
 from core.config import settings
 from core.logger import logger
 from services.risk_reward_manager import RiskRewardManager
+from services.trend_analyzer import TrendAnalyzer
 
 
 class TradingStrategy:
@@ -186,12 +187,17 @@ class TradingStrategy:
         Returns:
             tuple[bool, float]: (Deve entrar, pontuação da entrada)
         """
-        # Obter informações de tendência
-        from services.trend_analyzer import TrendAnalyzer
         trend = TrendAnalyzer.ema_trend(df)
 
         # Obter valor de ADX para medir força da tendência
         adx_value = df['adx'].iloc[-1] if 'adx' in df.columns else 25
+
+        # Verificação de alinhamento com tendência forte
+        if trend == "UPTREND" and trade_direction == "SHORT" and adx_value > 40:
+            return False, 0.0  # Rejeitar SHORT em tendência de ALTA forte
+
+        if trend == "DOWNTREND" and trade_direction == "LONG" and adx_value > 40:
+            return False, 0.0  # Rejeitar LONG em tendência de BAIXA forte
 
         # Calcular alinhamento da tendência com a direção do trade (0-1)
         trend_alignment = 0.5  # neutro por padrão
