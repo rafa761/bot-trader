@@ -1,6 +1,6 @@
 # strategies/strategy_manager.py
 
-from typing import Tuple, Dict, Any
+from typing import Any
 
 import pandas as pd
 
@@ -147,7 +147,8 @@ class StrategyManager:
                         return signal, False
 
                 # Verificar alinhamento com MTF se disponível
-                min_alignment = 0.3  # Valor mínimo para alinhamento MTF
+                # Usar um alinhamento mínimo mais baixo para estratégias em alta volatilidade
+                min_alignment = 0.2 if config.name.startswith("High Volatility") else 0.3
                 if hasattr(signal, 'mtf_alignment') and signal.mtf_alignment is not None:
                     if signal.mtf_alignment < min_alignment:
                         logger.info(

@@ -382,8 +382,9 @@ class TradingBot:
                 # Atualizar a estratégia atual para o resumo do sistema
                 self.current_strategy_name = market_analysis.get("strategy_name", "Não definida")
 
-                # 5. Gerar sinal de trading (isso não mudou)
-                signal = await self.signal_generator.generate_signal(df, current_price)
+                # 5. Gerar sinal de trading passando a estratégia atual
+                current_strategy = market_analysis.get("strategy")
+                signal = await self.signal_generator.generate_signal(df, current_price, current_strategy)
                 if not signal:
                     await asyncio.sleep(5)
                     continue

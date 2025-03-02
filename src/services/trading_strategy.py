@@ -224,23 +224,59 @@ class TradingStrategy:
             elif relative_volatility < 0.5:  # Baixa volatilidade
                 volatility_factor = 1.2  # Ser mais agressivo
 
-        # Se ambos os valores previstos TP e SL foram fornecidos, use-os para avaliação
-        if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
-            # Usar o RiskRewardManager para avaliar a qualidade do trade com os valores previstos
-            quality_score = self.risk_reward_manager.evaluate_trade_quality(
-                tp_pct=abs(predicted_tp_pct),
-                sl_pct=abs(predicted_sl_pct),
-                trend_strength=trend_alignment
-            ) * volatility_factor  # Aplicar fator de volatilidade
+        # Verificar se temos uma estratégia ativa no StrategyManager
+        try:
+            from strategies.strategy_manager import StrategyManager
+            strategy_manager = StrategyManager()
+            current_strategy = strategy_manager.strategy_selector.get_current_strategy()
+            use_strategy_config = current_strategy is not None
+        except Exception as e:
+            logger.warning(f"Erro ao acessar StrategyManager: {e}")
+            use_strategy_config = False
+            current_strategy = None
+
+        # Usar estratégia atual se disponível
+        if use_strategy_config:
+            # Ajustar threshold baseado na estratégia
+            config = current_strategy.get_config()
+            entry_threshold = config.entry_threshold
+
+            # Se ambos os valores previstos TP e SL foram fornecidos, use-os para avaliação
+            if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
+                # Usar o RiskRewardManager para avaliar a qualidade do trade com os valores previstos
+                # e aplicar os ajustes da estratégia atual
+                tp_adj = abs(predicted_tp_pct) * config.tp_adjustment
+                sl_adj = abs(predicted_sl_pct) * config.sl_adjustment
+                quality_score = self.risk_reward_manager.evaluate_trade_quality(
+                    tp_pct=tp_adj,
+                    sl_pct=sl_adj,
+                    trend_strength=trend_alignment
+                ) * volatility_factor * config.entry_aggressiveness
+            else:
+                # Caso não tenha TP/SL, ainda usar o EntryScorer mas ajustar com config da estratégia
+                from services.entry_scorer import EntryScorer
+                quality_score = EntryScorer.calculate_entry_score(
+                    df=df,
+                    current_price=current_price,
+                    trade_direction=trade_direction,
+                    trend_direction=trend
+                ) * volatility_factor * config.entry_aggressiveness
         else:
-            # Caso contrário, usar o EntryScorer para avaliação baseada apenas em indicadores técnicos
-            from services.entry_scorer import EntryScorer
-            quality_score = EntryScorer.calculate_entry_score(
-                df=df,
-                current_price=current_price,
-                trade_direction=trade_direction,
-                trend_direction=trend
-            ) * volatility_factor  # Aplicar fator de volatilidade
+            # Fallback para comportamento original se não houver estratégia
+            if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
+                quality_score = self.risk_reward_manager.evaluate_trade_quality(
+                    tp_pct=abs(predicted_tp_pct),
+                    sl_pct=abs(predicted_sl_pct),
+                    trend_strength=trend_alignment
+                ) * volatility_factor
+            else:
+                from services.entry_scorer import EntryScorer
+                quality_score = EntryScorer.calculate_entry_score(
+                    df=df,
+                    current_price=current_price,
+                    trade_direction=trade_direction,
+                    trend_direction=trend
+                ) * volatility_factor
 
         # Se temos alinhamento multi-timeframe, incorporá-lo na avaliação
         if mtf_alignment is not None:

@@ -1,7 +1,7 @@
 # services/lstm_signal_generator.py
 
 import datetime
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -199,13 +199,15 @@ class LSTMSignalGenerator(SignalGenerator):
             logger.error(f"Erro ao preparar sequência para LSTM: {e}", exc_info=True)
             return None
 
-    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> TradingSignal | None:
+    async def generate_signal(self, df: pd.DataFrame, current_price: float,
+                              current_strategy=None) -> TradingSignal | None:
         """
         Gera um sinal de trading baseado nos modelos LSTM.
 
         Args:
             df: DataFrame com dados históricos e indicadores técnicos
             current_price: Preço atual do ativo
+            current_strategy: Estratégia atual selecionada pelo StrategyManager (opcional)
 
         Returns:
             TradingSignal: Sinal de trading gerado ou None se não houver sinal
@@ -310,8 +312,23 @@ class LSTMSignalGenerator(SignalGenerator):
             rr_ratio = abs(predicted_tp_pct / predicted_sl_pct) if predicted_sl_pct > 0 else 0
             logger.info(f"Razão R:R calculada: {rr_ratio:.2f}")
 
-            # Decidir direção baseada nas previsões LSTM (agora considera R:R)
-            direction = self.strategy.decide_direction(predicted_tp_pct, predicted_sl_pct, threshold=0.2)
+            # Decidir direção baseada nas previsões LSTM e estratégia atual (se disponível)
+            if current_strategy:
+                # Obter o threshold da estratégia atual, com um ajuste para direcionalidade
+                strategy_config = current_strategy.get_config()
+                threshold = strategy_config.entry_threshold * 0.4  # Valor reduzido apenas para direcionalidade
+
+                # Ajustar TP/SL antes de decidir direção, conforme fatores da estratégia
+                adjusted_tp = predicted_tp_pct * strategy_config.tp_adjustment
+                adjusted_sl = predicted_sl_pct * strategy_config.sl_adjustment
+
+                direction = self.strategy.decide_direction(adjusted_tp, adjusted_sl, threshold=threshold)
+                logger.info(f"Direção decidida com estratégia {strategy_config.name}: {direction or 'Neutro'}")
+            else:
+                # Usar método original para fallback
+                direction = self.strategy.decide_direction(predicted_tp_pct, predicted_sl_pct, threshold=0.2)
+                logger.info(f"Direção decidida com método padrão: {direction or 'Neutro'}")
+
             if direction is None:
                 logger.info("Sinal neutro ou R:R insuficiente, não abrir trade.")
                 return None
