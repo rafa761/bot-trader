@@ -449,7 +449,7 @@ class DataPreprocessor:
                 # Último recurso: forçar conversão ou remover
                 try:
                     df_normalized[col] = df_normalized[col].astype(float)
-                except:
+                except Exception as e:
                     if col in df_normalized.columns:
                         logger.warning(f"Removendo coluna problemática: {col}")
                         df_normalized = df_normalized.drop(columns=[col])

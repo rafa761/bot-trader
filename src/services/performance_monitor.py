@@ -203,7 +203,7 @@ class Trade(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Converte o trade para um dicionário."""
-        result = self.dict()
+        result = self.model_dump()
 
         # Converter datetime para string ISO
         if result["entry_time"]:
@@ -300,7 +300,7 @@ class PerformanceMetrics(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Converte as métricas para um dicionário."""
-        result = self.dict()
+        result = self.model_dump()
 
         # Converter arrays numpy para listas Python, se necessário
         if isinstance(result["equity_curve"], np.ndarray):
@@ -1041,8 +1041,6 @@ class TradePerformanceMonitor(IPerformanceMonitor):
                 default=0
             )
         )
-
-        return result
 
     def _save_metrics_to_db(self) -> None:
         """Salva as métricas atuais no banco de dados."""

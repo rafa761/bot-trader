@@ -213,7 +213,7 @@ class MultiTimeFrameTrendAnalyzer:
         """
         try:
             # Verificar se o cliente está inicializado
-            if not self.client._initialized:
+            if not self.client.is_client_initialized():
                 await self.client.initialize()
 
             # Obter dados

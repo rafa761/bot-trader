@@ -129,7 +129,8 @@ class TradingStrategy:
 
         return quantity
 
-    def adjust_price_to_tick_size(self, price: float, tick_size: float) -> float:
+    @staticmethod
+    def adjust_price_to_tick_size(price: float, tick_size: float) -> float:
         """
         Arredonda 'price' para baixo (floor) ao múltiplo de tick_size.
 
@@ -139,7 +140,8 @@ class TradingStrategy:
         """
         return math.floor(price / tick_size) * tick_size
 
-    def format_price_for_tick_size(self, price: float, tick_size: float) -> str:
+    @staticmethod
+    def format_price_for_tick_size(price: float, tick_size: float) -> str:
         """
         Formata 'price' com a quantidade correta de casas decimais
         baseada no tick_size.
@@ -153,7 +155,8 @@ class TradingStrategy:
             decimals = len(str(tick_size).split('.')[-1])
         return f"{price:.{decimals}f}"
 
-    def adjust_quantity_to_step_size(self, qty: float, step_size: float) -> float:
+    @staticmethod
+    def adjust_quantity_to_step_size(qty: float, step_size: float) -> float:
         """
         Arredonda 'qty' para o múltiplo do step_size.
 

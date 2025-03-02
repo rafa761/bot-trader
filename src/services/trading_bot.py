@@ -436,7 +436,7 @@ class TradingBot:
                 logger.warning("CleanupHandler não encontrado. Tentando limpeza direta...")
 
                 # Código de fallback para limpeza básica
-                if not self.binance_client._initialized:
+                if not self.binance_client.is_client_initialized():
                     await self.binance_client.initialize()
 
                 # Cancelar ordens abertas

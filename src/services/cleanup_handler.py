@@ -100,7 +100,7 @@ class CleanupHandler:
         """Cancela todas as ordens abertas para o símbolo configurado."""
         try:
             # Verificar se o cliente está inicializado
-            if not self.client._initialized:
+            if not self.client.is_client_initialized():
                 await self.client.initialize()
 
             # Cancelar todas as ordens abertas
@@ -113,7 +113,7 @@ class CleanupHandler:
         """Fecha todas as posições abertas para o símbolo configurado."""
         try:
             # Verificar se o cliente está inicializado
-            if not self.client._initialized:
+            if not self.client.is_client_initialized():
                 await self.client.initialize()
 
             # Obter posições abertas
