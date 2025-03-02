@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from core.config import settings
 from core.constants import TRAIN_DATA_DIR
 from core.logger import logger
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 
 
 class DataHandler:

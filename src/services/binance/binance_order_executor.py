@@ -1,4 +1,4 @@
-# services/binance_order_executor.py
+# services/binance/binance_order_executor.py
 
 import datetime
 from typing import Any, Literal
@@ -12,7 +12,7 @@ from services.base.schemas import (
     OrderResult,
     TPSLResult
 )
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
 

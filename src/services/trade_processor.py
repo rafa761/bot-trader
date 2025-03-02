@@ -7,7 +7,7 @@ from core.logger import logger
 from services.base.interfaces import ITradeProcessor, IOrderExecutor
 from services.base.schemas import TradeResultDetails, ExecutedOrder
 from services.base.services import SignalGenerator
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
 
 
