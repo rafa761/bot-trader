@@ -1,13 +1,11 @@
 # strategies/volatility_strategies.py
 
-from typing import Optional
-
 import pandas as pd
 
 from core.config import settings
 from core.logger import logger
 from services.base.schemas import TradingSignal
-from strategies.base import BaseStrategy, StrategyConfig
+from strategies.base.model import BaseStrategy, StrategyConfig
 
 
 class HighVolatilityStrategy(BaseStrategy):

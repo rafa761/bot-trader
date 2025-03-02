@@ -6,6 +6,7 @@ from typing import Any, Literal
 from core.config import settings
 from core.logger import logger
 from services.base.interfaces import IOrderExecutor
+from services.base.schemas import ExecutedOrder
 from services.base.schemas import (
     TradingSignal,
     OrderResult,
@@ -52,14 +53,15 @@ class BinanceOrderExecutor(IOrderExecutor):
         self.executed_orders: list[dict[str, Any]] = []
         self.max_order_history = 100
 
-    def get_executed_orders(self) -> list[dict[str, Any]]:
+    def get_executed_orders(self) -> list[ExecutedOrder]:
         """
         Retorna uma cópia da lista de ordens executadas.
 
         Returns:
-            list: Lista de dicionários contendo informações das ordens executadas
+            list[ExecutedOrder]: Lista de objetos Pydantic contendo informações das ordens executadas
         """
-        return self.executed_orders.copy()
+        # Converte cada dicionário para um objeto ExecutedOrder
+        return [ExecutedOrder(**order) for order in self.executed_orders]
 
     def mark_order_as_processed(self, order_id: str) -> bool:
         """
@@ -79,14 +81,14 @@ class BinanceOrderExecutor(IOrderExecutor):
         logger.warning(f"Ordem {order_id} não encontrada para marcar como processada")
         return False
 
-    async def get_unprocessed_orders(self) -> list[dict[str, Any]]:
+    async def get_unprocessed_orders(self) -> list[ExecutedOrder]:
         """
         Retorna uma lista com ordens que ainda não foram processadas.
 
         Returns:
-            list: Lista de dicionários contendo ordens não processadas
+            list[ExecutedOrder]: Lista de objetos Pydantic contendo ordens não processadas
         """
-        return [order for order in self.executed_orders if not order.get("processed", False)]
+        return [ExecutedOrder(**order) for order in self.executed_orders if not order.get("processed", False)]
 
     async def initialize_filters(self) -> None:
         """
@@ -257,7 +259,7 @@ class BinanceOrderExecutor(IOrderExecutor):
                 # Adicionar ao histórico de ordens
                 self.executed_orders.append({
                     "signal_id": signal.id,
-                    "order_id": order_resp.get("orderId", "N/A"),
+                    "order_id": str(order_resp.get("orderId", "N/A")),
                     "direction": signal.direction,
                     "entry_price": signal.current_price,
                     "tp_price": signal.tp_price,

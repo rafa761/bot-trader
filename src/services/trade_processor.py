@@ -1,11 +1,11 @@
 # services/trade_processor.py
 
 import datetime
-from typing import Dict, Any
 
 from core.config import settings
 from core.logger import logger
 from services.base.interfaces import ITradeProcessor, IOrderExecutor
+from services.base.schemas import TradeResultDetails, ExecutedOrder
 from services.base.services import SignalGenerator
 from services.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
@@ -107,23 +107,23 @@ class TradeProcessor(ITradeProcessor):
             logger.error(f"Erro ao verificar status da ordem {order_id}: {e}", exc_info=True)
             return False
 
-    async def _get_trade_result(self, order: dict[str, Any]) -> dict[str, Any] | None:
+    async def _get_trade_result(self, order: ExecutedOrder) -> TradeResultDetails | None:
         """
         Obtém o resultado real de um trade fechado consultando a Binance.
 
         Args:
-            order: Dicionário com detalhes da ordem
+            order: Objeto ExecutedOrder com detalhes da ordem
 
         Returns:
-            Dict[str, Any]: Resultado real do trade com informações de TP/SL e preços
+            TradeResultDetails: Resultado real do trade com informações de TP/SL e preços
             None: Se não foi possível obter os resultados
         """
         try:
-            order_id = order.get("order_id")
-            direction = order.get("direction")
-            entry_price = order.get("entry_price")
-            tp_price = order.get("tp_price")
-            sl_price = order.get("sl_price")
+            order_id = order.order_id
+            direction = order.direction
+            entry_price = order.entry_price
+            tp_price = order.tp_price
+            sl_price = order.sl_price
 
             if not order_id or not entry_price:
                 return None
@@ -165,20 +165,20 @@ class TradeProcessor(ITradeProcessor):
                 # Calcular o percentual real
                 if is_tp:
                     actual_pct = (exit_price / entry_price - 1) * 100
-                    result = {
-                        "result": "TP",
-                        "actual_tp_pct": actual_pct,
-                        "actual_sl_pct": 0,
-                        "exit_price": exit_price
-                    }
+                    result = TradeResultDetails(
+                        result="TP",
+                        actual_tp_pct=actual_pct,
+                        actual_sl_pct=0,
+                        exit_price=exit_price
+                    )
                 else:
                     actual_pct = (1 - exit_price / entry_price) * 100
-                    result = {
-                        "result": "SL",
-                        "actual_tp_pct": 0,
-                        "actual_sl_pct": actual_pct,
-                        "exit_price": exit_price
-                    }
+                    result = TradeResultDetails(
+                        result="SL",
+                        actual_tp_pct=0,
+                        actual_sl_pct=actual_pct,
+                        exit_price=exit_price
+                    )
             else:  # SHORT
                 # Para SHORT: se saiu abaixo do preço de entrada, foi TP, senão foi SL
                 is_tp = exit_price < entry_price
@@ -237,11 +237,11 @@ class TradeProcessor(ITradeProcessor):
             executed_orders = self.order_executor.get_executed_orders()
 
             for order in executed_orders:
-                if order.get("processed", False):
+                if order.processed:
                     continue
 
-                signal_id = order.get("signal_id")
-                order_id = order.get("order_id")
+                signal_id = order.signal_id
+                order_id = order.order_id
 
                 if not signal_id or not order_id or order_id == "N/A":
                     continue

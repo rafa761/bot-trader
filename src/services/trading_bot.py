@@ -380,10 +380,10 @@ class TradingBot:
                 market_analysis = await self.strategy_manager.process_market_data(df, self.multi_tf_analyzer)
 
                 # Atualizar a estratégia atual para o resumo do sistema
-                self.current_strategy_name = market_analysis.get("strategy_name", "Não definida")
+                self.current_strategy_name = market_analysis.strategy_name
 
                 # 5. Gerar sinal de trading passando a estratégia atual
-                current_strategy = market_analysis.get("strategy")
+                current_strategy = market_analysis.strategy
                 signal = await self.signal_generator.generate_signal(df, current_price, current_strategy)
                 if not signal:
                     await asyncio.sleep(5)

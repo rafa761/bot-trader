@@ -1,10 +1,11 @@
 # services/base/interfaces.py
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from services.base.schemas import TradingSignal, OrderResult
+    from services.base.schemas import TradingSignal, OrderResult, ExecutedOrder
     from services.performance_monitor import Trade, PerformanceMetrics
 
 
@@ -24,7 +25,7 @@ class IOrderExecutor(ABC):
         pass
 
     @abstractmethod
-    def get_executed_orders(self) -> list[dict[str, Any]]:
+    def get_executed_orders(self) -> "list[ExecutedOrder]":
         """Retorna a lista de ordens executadas."""
         pass
 

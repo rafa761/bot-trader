@@ -1,12 +1,10 @@
 # services/strategy_selector.py
 
-from typing import Dict, List, Optional, Type
-
 import pandas as pd
 
 from core.logger import logger
 from services.base.schemas import TradingSignal
-from strategies.base import BaseStrategy, IMarketStrategy, MarketCondition
+from strategies.base.model import BaseStrategy, IMarketStrategy, MarketCondition
 from strategies.downtrend_strategy import DowntrendStrategy
 from strategies.range_strategy import RangeStrategy
 from strategies.uptrend_strategy import UptrendStrategy

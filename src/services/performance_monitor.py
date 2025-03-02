@@ -17,6 +17,78 @@ from core.logger import logger
 from services.base.interfaces import IPerformanceMonitor
 
 
+class DailyPnL(BaseModel):
+    date: str
+    day: str
+    pnl: float
+    trade_count: int
+    win_rate: float
+
+
+class WeeklyStats(BaseModel):
+    period: str
+    total_trades: int
+    winning_trades: int
+    win_rate: float
+    total_pnl: float
+    pnl_per_day: list[DailyPnL]
+    best_trade: float = 0
+    worst_trade: float = 0
+
+
+class WeeklyPerformanceSummary(BaseModel):
+    period: str
+    total_trades: int
+    winning_trades: int
+    win_rate: float
+    total_pnl: float
+    best_trade: float = 0
+    worst_trade: float = 0
+
+
+class DirectionStats(BaseModel):
+    trades: int
+    wins: int
+    win_rate: float
+
+
+class TrendStats(BaseModel):
+    trades: int
+    wins: int
+    win_rate: float
+
+
+class StreakStats(BaseModel):
+    current: int
+    max_win: int
+    max_loss: int
+
+
+class PredictionAccuracy(BaseModel):
+    tp: float
+    sl: float
+
+
+class GeneralStats(BaseModel):
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    profit_factor: float
+    expectancy: float
+    total_profit_loss: float
+    max_drawdown: float
+    avg_trade_duration_minutes: float
+
+
+class PerformanceReport(BaseModel):
+    general: GeneralStats
+    by_direction: dict[str, DirectionStats]
+    by_trend: dict[str, TrendStats]
+    streaks: StreakStats
+    prediction_accuracy: PredictionAccuracy
+    weekly_summary: WeeklyPerformanceSummary
+
 class TradeResult(str, Enum):
     """Enumeração para os possíveis resultados de um trade."""
     WIN = "WIN"
@@ -890,12 +962,12 @@ class TradePerformanceMonitor(IPerformanceMonitor):
         else:
             return "Formato não suportado"
 
-    def get_weekly_stats(self) -> dict[str, Any]:
+    def get_weekly_stats(self) -> WeeklyStats:
         """
         Calcula estatísticas detalhadas para a semana atual.
 
         Returns:
-            dict: Estatísticas semanais detalhadas
+            WeeklyStats: Estatísticas semanais detalhadas
         """
         # Obter data de início da semana atual (segunda-feira)
         today = datetime.datetime.now()
@@ -910,14 +982,14 @@ class TradePerformanceMonitor(IPerformanceMonitor):
 
         # Se não houver trades, retornar estatísticas vazias
         if not weekly_trades:
-            return {
-                "period": f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
-                "total_trades": 0,
-                "winning_trades": 0,
-                "win_rate": 0,
-                "total_pnl": 0.0,
-                "pnl_per_day": []
-            }
+            return WeeklyStats(
+                period=f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
+                total_trades=0,
+                winning_trades=0,
+                win_rate=0,
+                total_pnl=0.0,
+                pnl_per_day=[]
+            )
 
         # Calcular estatísticas básicas
         winning_trades = sum(1 for t in weekly_trades if t.result == TradeResult.WIN)
@@ -944,31 +1016,31 @@ class TradePerformanceMonitor(IPerformanceMonitor):
             day_win = sum(1 for t in day_trades if t.result == TradeResult.WIN)
             day_win_rate = day_win / day_count if day_count > 0 else 0
 
-            pnl_per_day.append({
-                "date": day_str,
-                "day": day_date.strftime('%a'),
-                "pnl": day_pnl,
-                "trade_count": day_count,
-                "win_rate": day_win_rate
-            })
+            pnl_per_day.append(DailyPnL(
+                date=day_str,
+                day=day_date.strftime('%a'),
+                pnl=day_pnl,
+                trade_count=day_count,
+                win_rate=day_win_rate
+            ))
 
         # Organizar resultados
-        result = {
-            "period": f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
-            "total_trades": total_trades,
-            "winning_trades": winning_trades,
-            "win_rate": win_rate,
-            "total_pnl": total_pnl,
-            "pnl_per_day": pnl_per_day,
-            "best_trade": max(
+        return WeeklyStats(
+            period=f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            pnl_per_day=pnl_per_day,
+            best_trade=max(
                 (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
                 default=0
             ),
-            "worst_trade": min(
+            worst_trade=min(
                 (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
                 default=0
             )
-        }
+        )
 
         return result
 
@@ -990,12 +1062,12 @@ class TradePerformanceMonitor(IPerformanceMonitor):
         except Exception as e:
             logger.error(f"Erro ao salvar métricas no banco de dados: {e}")
 
-    def get_weekly_performance_summary(self) -> dict[str, Any]:
+    def get_weekly_performance_summary(self) -> WeeklyPerformanceSummary:
         """
         Obtém um resumo de desempenho da semana atual.
 
         Returns:
-            Dicionário com resumo de desempenho semanal.
+            WeeklyPerformanceSummary: Resumo de desempenho semanal.
         """
         # Obter data de início da semana atual (segunda-feira)
         today = datetime.datetime.now()
@@ -1018,82 +1090,90 @@ class TradePerformanceMonitor(IPerformanceMonitor):
         total_pnl = total_profit + total_loss
 
         # Resumo
-        return {
-            "period": f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
-            "total_trades": total_trades,
-            "winning_trades": winning_trades,
-            "win_rate": win_rate,
-            "total_pnl": total_pnl,
-            "best_trade": max(
+        return WeeklyPerformanceSummary(
+            period=f"{start_of_week.strftime('%d/%m/%Y')} até {today.strftime('%d/%m/%Y')}",
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            best_trade=max(
                 (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
                 default=0
             ),
-            "worst_trade": min(
+            worst_trade=min(
                 (t.profit_loss_absolute for t in weekly_trades if t.profit_loss_absolute is not None),
                 default=0
             )
-        }
+        )
 
-    def get_performance_report(self) -> dict[str, Any]:
+    def get_performance_report(self) -> PerformanceReport:
         """
         Gera um relatório completo de desempenho.
 
         Returns:
-            Dicionário com métricas completas de desempenho.
+            PerformanceReport: Métricas completas de desempenho.
         """
         # Garantir que as métricas estão atualizadas
         self.calculate_metrics()
 
         # Criar relatório
-        report = {
-            "general": {
-                "total_trades": self.metrics.total_trades,
-                "winning_trades": self.metrics.winning_trades,
-                "losing_trades": self.metrics.losing_trades,
-                "win_rate": self.metrics.win_rate,
-                "profit_factor": self.metrics.profit_factor,
-                "expectancy": self.metrics.expectancy,
-                "total_profit_loss": self.metrics.total_profit_loss,
-                "max_drawdown": self.metrics.max_drawdown_pct,
-                "avg_trade_duration_minutes": self.metrics.avg_trade_duration_minutes
-            },
-            "by_direction": {
-                "long": {
-                    "trades": self.metrics.long_trades,
-                    "wins": self.metrics.long_wins,
-                    "win_rate": self.metrics.long_win_rate
-                },
-                "short": {
-                    "trades": self.metrics.short_trades,
-                    "wins": self.metrics.short_wins,
-                    "win_rate": self.metrics.short_win_rate
-                }
-            },
-            "by_trend": {
-                "aligned": {
-                    "trades": self.metrics.trend_aligned_trades,
-                    "wins": self.metrics.trend_aligned_wins,
-                    "win_rate": self.metrics.trend_aligned_win_rate
-                },
-                "counter": {
-                    "trades": self.metrics.counter_trend_trades,
-                    "wins": self.metrics.counter_trend_wins,
-                    "win_rate": self.metrics.counter_trend_win_rate
-                }
-            },
-            "streaks": {
-                "current": self.metrics.current_streak,
-                "max_win": self.metrics.max_win_streak,
-                "max_loss": self.metrics.max_loss_streak
-            },
-            "prediction_accuracy": {
-                "tp": self.metrics.tp_prediction_accuracy,
-                "sl": self.metrics.sl_prediction_accuracy
-            },
-            "weekly_summary": self.get_weekly_performance_summary()
+        general_stats = GeneralStats(
+            total_trades=self.metrics.total_trades,
+            winning_trades=self.metrics.winning_trades,
+            losing_trades=self.metrics.losing_trades,
+            win_rate=self.metrics.win_rate,
+            profit_factor=self.metrics.profit_factor,
+            expectancy=self.metrics.expectancy,
+            total_profit_loss=self.metrics.total_profit_loss,
+            max_drawdown=self.metrics.max_drawdown_pct,
+            avg_trade_duration_minutes=self.metrics.avg_trade_duration_minutes
+        )
+
+        by_direction = {
+            "long": DirectionStats(
+                trades=self.metrics.long_trades,
+                wins=self.metrics.long_wins,
+                win_rate=self.metrics.long_win_rate
+            ),
+            "short": DirectionStats(
+                trades=self.metrics.short_trades,
+                wins=self.metrics.short_wins,
+                win_rate=self.metrics.short_win_rate
+            )
         }
 
-        return report
+        by_trend = {
+            "aligned": TrendStats(
+                trades=self.metrics.trend_aligned_trades,
+                wins=self.metrics.trend_aligned_wins,
+                win_rate=self.metrics.trend_aligned_win_rate
+            ),
+            "counter": TrendStats(
+                trades=self.metrics.counter_trend_trades,
+                wins=self.metrics.counter_trend_wins,
+                win_rate=self.metrics.counter_trend_win_rate
+            )
+        }
+
+        streaks = StreakStats(
+            current=self.metrics.current_streak,
+            max_win=self.metrics.max_win_streak,
+            max_loss=self.metrics.max_loss_streak
+        )
+
+        prediction_accuracy = PredictionAccuracy(
+            tp=self.metrics.tp_prediction_accuracy,
+            sl=self.metrics.sl_prediction_accuracy
+        )
+
+        return PerformanceReport(
+            general=general_stats,
+            by_direction=by_direction,
+            by_trend=by_trend,
+            streaks=streaks,
+            prediction_accuracy=prediction_accuracy,
+            weekly_summary=self.get_weekly_performance_summary()
+        )
 
     def log_performance_summary(self) -> None:
         """

@@ -1,12 +1,12 @@
 # strategies/strategy_manager.py
 
-from typing import Any
-
 import pandas as pd
 
 from core.logger import logger
+from services.base.schemas import MarketAnalysisResult, MultiTimeFrameDetails, TimeFrameSummary
 from services.base.schemas import TradingSignal
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
+from strategies.base.schemas import StrategyDetails, StrategyConfigSummary
 from strategies.strategy_selector import StrategySelector
 
 
@@ -28,7 +28,8 @@ class StrategyManager:
         self.last_mtf_data = {}
         self.last_strategy_name = "Nenhuma"
 
-    async def process_market_data(self, df: pd.DataFrame, mtf_analyzer: MultiTimeFrameTrendAnalyzer) -> dict[str, Any]:
+    async def process_market_data(self, df: pd.DataFrame,
+                                  mtf_analyzer: MultiTimeFrameTrendAnalyzer) -> MarketAnalysisResult:
         """
         Processa os dados de mercado, realizando análise multi-timeframe e selecionando a estratégia adequada.
 
@@ -37,7 +38,7 @@ class StrategyManager:
             mtf_analyzer: Analisador multi-timeframe
 
         Returns:
-            Dicionário com dados da análise incluindo a estratégia selecionada
+            MarketAnalysisResult com dados da análise incluindo a estratégia selecionada
         """
         try:
             # Realizar análise multi-timeframe
@@ -56,24 +57,46 @@ class StrategyManager:
                 logger.warning("Nenhuma estratégia selecionada")
                 self.last_strategy_name = "Nenhuma"
 
-            result = {
-                "mtf_trend": mtf_trend,
-                "mtf_confidence": confidence,
-                "mtf_details": details,
-                "strategy_name": self.last_strategy_name,
-                "strategy": strategy
-            }
+            # Converter os detalhes da análise multi-timeframe para schema Pydantic
+            mtf_details = MultiTimeFrameDetails(
+                consolidated_trend=details["consolidated_trend"],
+                trend_score=details["trend_score"],
+                confidence=details["confidence"],
+                tf_summary={
+                    k: TimeFrameSummary(strength=v["strength"], score=v["score"])
+                    for k, v in details["tf_summary"].items()
+                },
+                tf_details=details["tf_details"],
+                tf_agreement=details["tf_agreement"]
+            )
 
-            return result
+            # Criar e retornar o resultado da análise usando schema Pydantic
+            return MarketAnalysisResult(
+                mtf_trend=mtf_trend,
+                mtf_confidence=confidence,
+                mtf_details=mtf_details,
+                strategy_name=self.last_strategy_name,
+                strategy=strategy
+            )
         except Exception as e:
             logger.error(f"Erro ao processar dados de mercado: {e}", exc_info=True)
-            return {
-                "mtf_trend": "NEUTRAL",
-                "mtf_confidence": 0.0,
-                "mtf_details": {},
-                "strategy_name": "Fallback",
-                "strategy": None
-            }
+            # Em caso de erro, retornar um resultado padrão
+            fallback_details = MultiTimeFrameDetails(
+                consolidated_trend="NEUTRAL",
+                trend_score=0.0,
+                confidence=0.0,
+                tf_summary={},
+                tf_details={},
+                tf_agreement=0.0
+            )
+
+            return MarketAnalysisResult(
+                mtf_trend="NEUTRAL",
+                mtf_confidence=0.0,
+                mtf_details=fallback_details,
+                strategy_name="Fallback",
+                strategy=None
+            )
 
     async def evaluate_signal(self,
                               signal: TradingSignal,
@@ -172,35 +195,41 @@ class StrategyManager:
             logger.error(f"Erro ao avaliar sinal: {e}", exc_info=True)
             return signal, False
 
-    def get_strategy_details(self) -> dict:
+    def get_strategy_details(self) -> StrategyDetails:
         """
         Retorna detalhes sobre a estratégia atual para logging e monitoramento.
 
         Returns:
-            Dicionário com detalhes da estratégia atual
+            StrategyDetails com detalhes da estratégia atual
         """
         strategy = self.strategy_selector.get_current_strategy()
         condition = self.strategy_selector.get_current_condition()
 
         if strategy is None or condition is None:
-            return {
-                "active": False,
-                "name": "Nenhuma",
-                "condition": "Desconhecida",
-                "config": {}
-            }
+            return StrategyDetails(
+                active=False,
+                name="Nenhuma",
+                condition="Desconhecida",
+                config=StrategyConfigSummary(
+                    min_rr_ratio=1.5,
+                    entry_threshold=0.6,
+                    tp_adjustment=1.0,
+                    sl_adjustment=1.0,
+                    entry_aggressiveness=1.0
+                )
+            )
 
         config = strategy.get_config()
 
-        return {
-            "active": True,
-            "name": config.name,
-            "condition": condition.value,
-            "config": {
-                "min_rr_ratio": config.min_rr_ratio,
-                "entry_threshold": config.entry_threshold,
-                "tp_adjustment": config.tp_adjustment,
-                "sl_adjustment": config.sl_adjustment,
-                "entry_aggressiveness": config.entry_aggressiveness
-            }
-        }
+        return StrategyDetails(
+            active=True,
+            name=config.name,
+            condition=condition.value,
+            config=StrategyConfigSummary(
+                min_rr_ratio=config.min_rr_ratio,
+                entry_threshold=config.entry_threshold,
+                tp_adjustment=config.tp_adjustment,
+                sl_adjustment=config.sl_adjustment,
+                entry_aggressiveness=config.entry_aggressiveness
+            )
+        )

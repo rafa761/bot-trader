@@ -11,6 +11,7 @@ import pandas as pd
 
 from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR, TRAINED_MODELS_BACKUP_DIR, TRAINED_MODELS_TEMP_DIR
 from core.logger import logger
+from models.base.schemas import RetrainingStatus
 from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig
 from models.lstm.trainer import LSTMTrainer
@@ -737,28 +738,28 @@ class ModelRetrainer:
 
         return True
 
-    def get_retraining_status(self) -> dict:
+    def get_retraining_status(self) -> RetrainingStatus:
         """
         Retorna o status atual do sistema de retreinamento.
 
         Returns:
-            dict: Dicionário com informações sobre o status de retreinamento
+            RetrainingStatus: Objeto Pydantic com informações sobre o status de retreinamento
         """
         with self.lock:
             # Calcular médias de erros se houver registros suficientes
             tp_error_mean = np.mean(self.tp_errors) if len(self.tp_errors) > 0 else 0
             sl_error_mean = np.mean(self.sl_errors) if len(self.sl_errors) > 0 else 0
 
-            return {
-                "retraining_in_progress": self.retraining_in_progress,
-                "last_retraining_time": self.last_retraining_time.isoformat(),
-                "hours_since_last_retraining": (datetime.now() - self.last_retraining_time).total_seconds() / 3600,
-                "recent_error_count": len(self.recent_prediction_errors),
-                "mean_error": np.mean(self.recent_prediction_errors) if self.recent_prediction_errors else 0,
-                "tp_error_mean": tp_error_mean,
-                "sl_error_mean": sl_error_mean,
-                "tp_model_version": self.tp_model.config.version,
-                "sl_model_version": self.sl_model.config.version,
-                "next_check_in_cycles": self.check_interval_cycles - self.cycles_since_last_check,
-                "models_updated_flag": self.models_updated.is_set()
-            }
+            return RetrainingStatus(
+                retraining_in_progress=self.retraining_in_progress,
+                last_retraining_time=self.last_retraining_time.isoformat(),
+                hours_since_last_retraining=(datetime.now() - self.last_retraining_time).total_seconds() / 3600,
+                recent_error_count=len(self.recent_prediction_errors),
+                mean_error=np.mean(self.recent_prediction_errors) if self.recent_prediction_errors else 0,
+                tp_error_mean=tp_error_mean,
+                sl_error_mean=sl_error_mean,
+                tp_model_version=self.tp_model.config.version,
+                sl_model_version=self.sl_model.config.version,
+                next_check_in_cycles=self.check_interval_cycles - self.cycles_since_last_check,
+                models_updated_flag=self.models_updated.is_set()
+            )
