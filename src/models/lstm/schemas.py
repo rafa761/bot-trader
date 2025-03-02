@@ -9,15 +9,15 @@ class LSTMConfig(ModelConfig):
     """
     Configuração específica para o modelo LSTM - Otimizada para hardware de alto desempenho.
     """
-    sequence_length: int = Field(48, description="Número de timesteps para cada sequência")
-    lstm_units: list[int] = Field([256, 128, 64], description="Unidades para cada camada LSTM")
-    dense_units: list[int] = Field([128, 64], description="Unidades para cada camada densa")
-    dropout_rate: float = Field(0.3, ge=0, le=1, description="Taxa de dropout")
+    sequence_length: int = Field(16, description="Número de timesteps para cada sequência")
+    lstm_units: list[int] = Field([128, 64], description="Unidades para cada camada LSTM")
+    dense_units: list[int] = Field([64, 32], description="Unidades para cada camada densa")
+    dropout_rate: float = Field(0.2, ge=0, le=1, description="Taxa de dropout")
     recurrent_dropout_rate: float = Field(0.1, ge=0, le=1, description="Taxa de dropout recorrente")
     l2_regularization: float = Field(0.0001, ge=0, description="Fator de regularização L2")
     learning_rate: float = Field(0.001, gt=0, description="Taxa de aprendizado inicial")
-    batch_size: int = Field(256, gt=0, description="Tamanho do batch")
-    epochs: int = Field(200, gt=0, description="Número máximo de épocas")
+    batch_size: int = Field(128, gt=0, description="Tamanho do batch")
+    epochs: int = Field(100, gt=0, description="Número máximo de épocas")
     use_amsgrad: bool = Field(True, description="Usar variante AMSGrad do Adam")
 
 class LSTMTrainingConfig(TrainingConfig):
