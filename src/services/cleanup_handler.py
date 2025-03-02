@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from core.logger import logger
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 
 
 class CleanupHandler:

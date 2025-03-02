@@ -1,14 +1,16 @@
-# strategies\base.py
+# strategies/base/model.py
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import pandas as pd
 from pydantic import BaseModel, Field
 
 from core.logger import logger
-from services.base.schemas import TradingSignal
+
+if TYPE_CHECKING:
+    from services.base.schemas import TradingSignal
 
 
 class MarketCondition(str, Enum):
@@ -61,7 +63,7 @@ class IMarketStrategy(ABC):
         pass
 
     @abstractmethod
-    def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
+    def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> "TradingSignal | None":
         """
         Gera um sinal de trading com base na estratégia.
 
@@ -76,7 +78,7 @@ class IMarketStrategy(ABC):
         pass
 
     @abstractmethod
-    def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
+    def adjust_signal(self, signal: "TradingSignal", df: pd.DataFrame, mtf_data: dict) -> "TradingSignal":
         """
         Ajusta um sinal existente baseado nas condições de mercado.
 

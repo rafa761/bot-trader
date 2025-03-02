@@ -10,8 +10,11 @@ from models.lstm.model import LSTMModel
 from services.base.interfaces import IOrderExecutor, IPerformanceMonitor
 # Importando as classes extraídas
 from services.base.services import MarketDataProvider, SignalGenerator
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
+from services.binance.binance_data_provider import BinanceDataProvider
+from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
+from services.lstm_signal_generator import LSTMSignalGenerator
 from services.market_analyzers import MarketTrendAnalyzer
 from services.model_retrainer import ModelRetrainer
 from services.performance_monitor import TradePerformanceMonitor
@@ -50,11 +53,6 @@ class TradingBot:
         # Analisador de tendências de mercado
         self.market_analyzer = MarketTrendAnalyzer()
         self.multi_tf_analyzer = None  # Será inicializado no método initialize()
-
-        # Implementações SOLID com interfaces
-        from services.binance_data_provider import BinanceDataProvider
-        from services.lstm_signal_generator import LSTMSignalGenerator
-        from services.binance_order_executor import BinanceOrderExecutor
 
         # Componentes seguindo injeção de dependência
         self.data_provider: MarketDataProvider = BinanceDataProvider(
@@ -380,10 +378,11 @@ class TradingBot:
                 market_analysis = await self.strategy_manager.process_market_data(df, self.multi_tf_analyzer)
 
                 # Atualizar a estratégia atual para o resumo do sistema
-                self.current_strategy_name = market_analysis.get("strategy_name", "Não definida")
+                self.current_strategy_name = market_analysis.strategy_name
 
-                # 5. Gerar sinal de trading (isso não mudou)
-                signal = await self.signal_generator.generate_signal(df, current_price)
+                # 5. Gerar sinal de trading passando a estratégia atual
+                current_strategy = market_analysis.strategy
+                signal = await self.signal_generator.generate_signal(df, current_price, current_strategy)
                 if not signal:
                     await asyncio.sleep(5)
                     continue

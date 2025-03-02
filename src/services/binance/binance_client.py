@@ -1,4 +1,4 @@
-# services/binance_client.py
+# services/binance/binance_client.py
 
 import asyncio
 import math
