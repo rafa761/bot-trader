@@ -5,6 +5,7 @@ import math
 from core.config import settings
 from core.logger import logger
 from services.risk_reward_manager import RiskRewardManager
+from strategies.strategy_manager import StrategyManager
 
 
 class TradingStrategy:
@@ -66,8 +67,8 @@ class TradingStrategy:
             logger.info(f"Sinal neutro: TP={predicted_tp_pct:.2f}% dentro do threshold ({threshold})")
             return None
 
+    @staticmethod
     def calculate_trade_quantity(
-            self,
             capital: float,
             current_price: float,
             leverage: float,
@@ -229,7 +230,6 @@ class TradingStrategy:
 
         # Verificar se temos uma estratégia ativa no StrategyManager
         try:
-            from strategies.strategy_manager import StrategyManager
             strategy_manager = StrategyManager()
             current_strategy = strategy_manager.strategy_selector.get_current_strategy()
             use_strategy_config = current_strategy is not None

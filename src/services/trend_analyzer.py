@@ -250,7 +250,8 @@ class MultiTimeFrameTrendAnalyzer:
             logger.error(f"Erro ao obter dados para timeframe {timeframe.value}: {e}")
             return pd.DataFrame()
 
-    def _add_trend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _add_trend_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """
         Adiciona indicadores de tendência ao DataFrame.
 

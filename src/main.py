@@ -3,11 +3,9 @@
 import asyncio
 import signal
 import sys
-import threading
 
 from core.constants import TRAINED_MODELS_DIR
 from core.logger import logger
-from dashboard.dashboard import create_dashboard
 from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig
 from services.trading_bot import TradingBot
@@ -65,19 +63,6 @@ async def async_main() -> None:
     # Inicializa o TradingBot com os modelos carregados
     bot = TradingBot(tp_model=tp_model, sl_model=sl_model)
     bot_instance = bot  # Armazena a referência global ao bot
-
-    # Cria o dashboard
-    logger.info("Iniciando Dashboard...")
-    dashboard_app = create_dashboard(bot.data_handler)
-
-    # Executa o Dash em thread separada
-    dash_thread = threading.Thread(
-        target=dashboard_app.run_server,
-        kwargs={"debug": False, "use_reloader": False},
-        daemon=True
-    )
-    dash_thread.start()
-    logger.info("Dashboard iniciado com sucesso")
 
     try:
         logger.info("Bot iniciado")

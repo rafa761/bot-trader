@@ -140,7 +140,8 @@ class BaseStrategy(IMarketStrategy):
             return False
         return True
 
-    def calculate_trend_direction(self, df: pd.DataFrame) -> str:
+    @staticmethod
+    def calculate_trend_direction(df: pd.DataFrame) -> str:
         """
         Calcula a direção atual da tendência com base nas médias móveis.
 
@@ -161,7 +162,8 @@ class BaseStrategy(IMarketStrategy):
 
         return "NEUTRAL"
 
-    def calculate_volatility_level(self, df: pd.DataFrame) -> float:
+    @staticmethod
+    def calculate_volatility_level(df: pd.DataFrame) -> float:
         """
         Calcula o nível de volatilidade atual com base no ATR percentual.
 

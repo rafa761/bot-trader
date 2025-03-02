@@ -6,16 +6,13 @@ import numpy as np
 from core.config import settings
 from core.logger import logger
 from models.lstm.model import LSTMModel
-from services.base.interfaces import IOrderExecutor, IPerformanceMonitor
-# Importando as classes extraídas
+from services.base.interfaces import IOrderExecutor
 from services.base.services import MarketDataProvider
 from services.binance.binance_client import BinanceClient
 from services.binance.binance_data_provider import BinanceDataProvider
 from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
 from services.market_analyzers import MarketTrendAnalyzer
-from services.performance_monitor import TradePerformanceMonitor
-from services.trade_processor import TradeProcessor
 from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
 from strategies.strategy_manager import StrategyManager
@@ -44,7 +41,6 @@ class TradingBot:
         # Componentes do sistema
         from repositories.data_handler import DataHandler
         self.data_handler = DataHandler(self.binance_client)
-        self.performance_monitor: IPerformanceMonitor = TradePerformanceMonitor()
         self.strategy = TradingStrategy()
 
         # Analisador de tendências de mercado
@@ -60,15 +56,6 @@ class TradingBot:
         self.order_executor: IOrderExecutor = BinanceOrderExecutor(
             binance_client=self.binance_client,
             strategy=self.strategy,
-            performance_monitor=self.performance_monitor
-        )
-
-        # Processador de trades - Corrigido para receber o order_executor
-        self.trade_processor = TradeProcessor(
-            binance_client=self.binance_client,
-            signal_generator=None,
-            performance_monitor=self.performance_monitor,
-            order_executor=self.order_executor
         )
 
         # Gerenciador de estratégias centralizado
@@ -146,26 +133,6 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro ao mostrar análise multi-timeframe: {e}")
 
-        # Adicionar métricas de performance
-        try:
-            metrics = self.performance_monitor.metrics
-            if metrics.total_trades > 0:
-                logger.info("-" * 30)
-                logger.info("MÉTRICAS DE PERFORMANCE")
-                logger.info(f"Total de trades: {metrics.total_trades}")
-                logger.info(f"Win rate: {metrics.win_rate:.2%}")
-                logger.info(f"P&L total: ${metrics.total_profit_loss:.2f}")
-                logger.info(f"Expectancy: ${metrics.expectancy:.2f}")
-
-                if metrics.long_trades > 0:
-                    logger.info(
-                        f"LONG win rate: {metrics.long_win_rate:.2%} ({metrics.long_wins}/{metrics.long_trades})")
-                if metrics.short_trades > 0:
-                    logger.info(
-                        f"SHORT win rate: {metrics.short_win_rate:.2%} ({metrics.short_wins}/{metrics.short_trades})")
-        except Exception as e:
-            logger.error(f"Erro ao incluir métricas de performance no resumo: {e}")
-
         # Adicionar informações sobre a estratégia atual
         logger.info(f"Estratégia atual: {self.current_strategy_name}")
         if hasattr(self, 'strategy_manager'):
@@ -190,7 +157,6 @@ class TradingBot:
 
             # Inicializar o gerenciador de estratégias (se não foi feito no __init__)
             if not hasattr(self, 'strategy_manager'):
-                from strategies.strategy_manager import StrategyManager
                 self.strategy_manager = StrategyManager()
                 logger.info("Gerenciador de estratégias inicializado")
 
@@ -201,13 +167,6 @@ class TradingBot:
                 # A cada 10 ciclos, mostra um resumo do sistema
                 if self.cycle_count % 10 == 0:
                     await self._log_system_summary()
-
-                    # Adicionar resumo de performance a cada 30 ciclos
-                    if self.cycle_count % 30 == 0:
-                        self.performance_monitor.log_performance_summary()
-
-                # Processar trades completados para fornecer dados ao retreinador
-                await self.trade_processor.process_completed_trades()
 
                 # 1. Atualizar dados de mercado
                 df = await self.data_provider.get_latest_data()
@@ -266,10 +225,11 @@ class TradingBot:
                 logger.info(f"Executando ordem: {signal.direction} em {current_price}")
                 order_result = await self.order_executor.execute_order(signal)
 
-                if order_result.success:
-                    logger.info(f"Ordem executada com sucesso! ID: {order_result.order_id}")
-                else:
-                    logger.warning(f"Falha na execução da ordem: {order_result.error_message}")
+                if order_result:
+                    if order_result.success:
+                        logger.info(f"Ordem executada com sucesso! ID: {order_result.order_id}")
+                    else:
+                        logger.warning(f"Falha na execução da ordem: {order_result.error_message}")
 
                 await asyncio.sleep(5)
 
