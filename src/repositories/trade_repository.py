@@ -81,14 +81,14 @@ class TradeRepository:
                     "UPDATE trades SET data = ?, signal_id = ?, updated_at = CURRENT_TIMESTAMP WHERE trade_id = ?",
                     (json.dumps(trade.to_dict()), trade.signal_id, trade.trade_id)
                 )
-                logger.debug(f"Trade {trade.trade_id} atualizado no banco de dados")
+                logger.info(f"Trade {trade.trade_id} atualizado no banco de dados")
             else:
                 # Inserir novo
                 cursor.execute(
                     "INSERT INTO trades (trade_id, signal_id, data) VALUES (?, ?, ?)",
                     (trade.trade_id, trade.signal_id, json.dumps(trade.to_dict()))
                 )
-                logger.debug(f"Trade {trade.trade_id} inserido no banco de dados")
+                logger.info(f"Trade {trade.trade_id} inserido no banco de dados")
 
             conn.commit()
             conn.close()

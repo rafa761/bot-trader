@@ -97,7 +97,7 @@ class DataHandler:
                 # Se o DataFrame estiver vazio, apenas adiciona o novo registro
                 if self.historical_df.empty:
                     self.historical_df = pd.DataFrame([new_row])
-                    logger.debug("Primeiro registro adicionado ao DataFrame histórico.")
+                    logger.info("Primeiro registro adicionado ao DataFrame histórico.")
                     return
 
                 # Adiciona a nova linha, remove duplicatas e ordena

@@ -1056,7 +1056,7 @@ class TradePerformanceMonitor(IPerformanceMonitor):
             conn.commit()
             conn.close()
 
-            logger.debug("Métricas salvas no banco de dados")
+            logger.info("Métricas salvas no banco de dados")
         except Exception as e:
             logger.error(f"Erro ao salvar métricas no banco de dados: {e}")
 

@@ -3,6 +3,7 @@
 import pandas as pd
 
 from core.logger import logger
+from models.lstm.model import LSTMModel
 from services.base.schemas import MarketAnalysisResult, MultiTimeFrameDetails, TimeFrameSummary
 from services.base.schemas import TradingSignal
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
@@ -19,9 +20,9 @@ class StrategyManager:
     evitando duplicação de análises e conflitos entre componentes.
     """
 
-    def __init__(self):
+    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
         """Inicializa o gerenciador de estratégias."""
-        self.strategy_selector = StrategySelector()
+        self.strategy_selector = StrategySelector(tp_model, sl_model)
         logger.info("Gerenciador de estratégias inicializado")
 
         # Armazenar dados da última análise multi-timeframe
@@ -136,6 +137,12 @@ class StrategyManager:
                     if 'tf_summary' in self.last_mtf_data:
                         signal.mtf_details = self.last_mtf_data['tf_summary']
 
+                # Adicionar log detalhado sobre alinhamento MTF
+                logger.info(
+                    f"Sinal {signal.direction} avaliado - Alinhamento MTF: {alignment_score:.2f}, "
+                    f"Confiança: {confidence:.2f}. Tendência: {self.last_mtf_data.get('consolidated_trend', 'N/A')}"
+                )
+
             # Obter a estratégia selecionada
             strategy = self.strategy_selector.get_current_strategy()
 
@@ -146,7 +153,11 @@ class StrategyManager:
             if strategy:
                 # Ajustar o sinal com base na estratégia
                 signal = strategy.adjust_signal(signal, df, self.last_mtf_data)
-                logger.info(f"Sinal ajustado pela estratégia: {strategy.get_config().name}")
+                logger.info(
+                    f"Sinal ajustado pela estratégia: {strategy.get_config().name} - "
+                    f"TP: {signal.predicted_tp_pct:.2f}%, SL: {signal.predicted_sl_pct:.2f}%, "
+                    f"R:R: {signal.rr_ratio:.2f}"
+                )
 
                 # Verificar se o sinal atende aos critérios mínimos da estratégia
                 config = strategy.get_config()
@@ -160,6 +171,10 @@ class StrategyManager:
                             f"Sinal rejeitado: score ({signal.entry_score:.2f}) < threshold ({config.entry_threshold:.2f})"
                         )
                         return signal, False
+                    else:
+                        logger.info(
+                            f"Sinal aprovado: score ({signal.entry_score:.2f}) >= threshold ({config.entry_threshold:.2f})"
+                        )
 
                 # Verificar se a razão risk:reward é adequada
                 if hasattr(signal, 'rr_ratio') and signal.rr_ratio is not None:
@@ -168,6 +183,10 @@ class StrategyManager:
                             f"Sinal rejeitado: R:R ({signal.rr_ratio:.2f}) < mínimo ({config.min_rr_ratio:.2f})"
                         )
                         return signal, False
+                    else:
+                        logger.info(
+                            f"Sinal aprovado: R:R ({signal.rr_ratio:.2f}) >= mínimo ({config.min_rr_ratio:.2f})"
+                        )
 
                 # Verificar alinhamento com MTF se disponível
                 # Usar um alinhamento mínimo mais baixo para estratégias em alta volatilidade
@@ -178,6 +197,10 @@ class StrategyManager:
                             f"Sinal rejeitado: baixo alinhamento MTF ({signal.mtf_alignment:.2f} < {min_alignment})"
                         )
                         return signal, False
+                    else:
+                        logger.info(
+                            f"Sinal aprovado: alinhamento MTF adequado ({signal.mtf_alignment:.2f} >= {min_alignment})"
+                        )
 
                 # Se passou por todas as verificações, sinal aprovado
                 logger.info(
@@ -194,6 +217,32 @@ class StrategyManager:
         except Exception as e:
             logger.error(f"Erro ao avaliar sinal: {e}", exc_info=True)
             return signal, False
+
+    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> TradingSignal | None:
+        """
+        Gera um sinal de trading utilizando a estratégia mais adequada.
+
+        Args:
+            df: DataFrame com dados históricos
+            current_price: Preço atual do ativo
+
+        Returns:
+            TradingSignal: Sinal de trading gerado ou None se não houver sinal
+        """
+        # Obter a estratégia atual
+        strategy = self.strategy_selector.get_current_strategy()
+
+        if not strategy:
+            strategy = self.strategy_selector.select_strategy(df, self.last_mtf_data)
+
+        if not strategy:
+            logger.warning("Nenhuma estratégia disponível para gerar sinal")
+            return None
+
+        # Deixar a estratégia gerar o sinal
+        signal = await strategy.generate_signal(df, current_price, self.last_mtf_data)
+        return signal
+
 
     def get_strategy_details(self) -> StrategyDetails:
         """

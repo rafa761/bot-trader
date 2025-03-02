@@ -117,7 +117,7 @@ class RiskRewardManager:
         rr_ratio = tp_pct / sl_pct
 
         # Log para debug
-        logger.debug(f"Avaliando trade: TP={tp_pct:.2f}%, SL={sl_pct:.2f}%, R:R={rr_ratio:.2f}")
+        logger.info(f"Avaliando trade: TP={tp_pct:.2f}%, SL={sl_pct:.2f}%, R:R={rr_ratio:.2f}")
 
         # Pontuação base da razão R:R (0-0.6)
         if rr_ratio < 1.0:
@@ -144,7 +144,7 @@ class RiskRewardManager:
         total_score = rr_score + tp_score + sl_score + trend_score
 
         # Log detalhado
-        logger.debug(
+        logger.info(
             f"Scores detalhados - R:R: {rr_score:.2f}, TP: {tp_score:.2f}, "
             f"SL: {sl_score:.2f}, Tendência: {trend_score:.2f}, Total: {total_score:.2f}"
         )

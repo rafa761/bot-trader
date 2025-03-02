@@ -1,6 +1,5 @@
 # services/trading_bot.py
 import asyncio
-import datetime
 
 import numpy as np
 
@@ -9,14 +8,12 @@ from core.logger import logger
 from models.lstm.model import LSTMModel
 from services.base.interfaces import IOrderExecutor, IPerformanceMonitor
 # Importando as classes extraídas
-from services.base.services import MarketDataProvider, SignalGenerator
+from services.base.services import MarketDataProvider
 from services.binance.binance_client import BinanceClient
 from services.binance.binance_data_provider import BinanceDataProvider
 from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
-from services.lstm_signal_generator import LSTMSignalGenerator
 from services.market_analyzers import MarketTrendAnalyzer
-from services.model_retrainer import ModelRetrainer
 from services.performance_monitor import TradePerformanceMonitor
 from services.trade_processor import TradeProcessor
 from services.trading_strategy import TradingStrategy
@@ -60,13 +57,6 @@ class TradingBot:
             data_handler=self.data_handler
         )
 
-        self.signal_generator: SignalGenerator = LSTMSignalGenerator(
-            tp_model=tp_model,
-            sl_model=sl_model,
-            strategy=self.strategy,
-            sequence_length=24
-        )
-
         self.order_executor: IOrderExecutor = BinanceOrderExecutor(
             binance_client=self.binance_client,
             strategy=self.strategy,
@@ -76,24 +66,13 @@ class TradingBot:
         # Processador de trades - Corrigido para receber o order_executor
         self.trade_processor = TradeProcessor(
             binance_client=self.binance_client,
-            signal_generator=self.signal_generator,
+            signal_generator=None,
             performance_monitor=self.performance_monitor,
             order_executor=self.order_executor
         )
 
-        # Sistema de retreinamento com referência para o signal_generator
-        self.model_retrainer = ModelRetrainer(
-            tp_model=tp_model,
-            sl_model=sl_model,
-            get_data_callback=self.get_historical_data_for_retraining,
-            signal_generator_ref=lambda: self.signal_generator,
-            retraining_interval_hours=24,
-            min_data_points=1000,
-            performance_threshold=0.15
-        )
-
         # Gerenciador de estratégias centralizado
-        self.strategy_manager = StrategyManager()
+        self.strategy_manager = StrategyManager(tp_model=tp_model, sl_model=sl_model)
 
         # Estratégia atual (mantido para compatibilidade com os logs)
         self.current_strategy_name = "Não definida"
@@ -104,11 +83,6 @@ class TradingBot:
 
         # Controle de ciclos
         self.cycle_count = 0
-
-        # Controle de verificação de retreinamento
-        self.last_retraining_check = datetime.datetime.now()
-        self.retraining_check_interval = 300  # 5 minutos
-        self.check_retraining_status_interval = 60  # Verificar a cada 60 ciclos
 
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
@@ -143,55 +117,8 @@ class TradingBot:
             symbol=settings.SYMBOL
         )
 
-        # Iniciar o sistema de retreinamento
-        self.model_retrainer.start()
-
         logger.info("TradingBot inicializado e pronto para operar.")
 
-    async def check_model_updates(self) -> None:
-        """
-        Verifica se os modelos foram atualizados pelo retreinador e sincroniza se necessário.
-        """
-        try:
-            # Verificar se já passou tempo suficiente desde a última verificação
-            current_time = datetime.datetime.now()
-            if (current_time - self.last_retraining_check).total_seconds() < self.retraining_check_interval:
-                return
-
-            self.last_retraining_check = current_time
-
-            # Verificar status do retreinamento
-            retraining_status = self.model_retrainer.get_retraining_status()
-
-            # Se modelos foram atualizados, sincronizar
-            if retraining_status.get("models_updated_flag", False):
-                logger.info("Detectada atualização de modelos - Sincronizando signal_generator")
-
-                # Aguardar um breve momento para garantir que os modelos estejam completamente atualizados
-                await asyncio.sleep(2)
-
-                # Atualizar modelos do signal_generator
-                if hasattr(self.signal_generator, 'update_models'):
-                    updated = self.signal_generator.update_models(
-                        tp_model=self.model_retrainer.tp_model,
-                        sl_model=self.model_retrainer.sl_model
-                    )
-
-                    if updated:
-                        logger.info("Signal Generator sincronizado com os modelos retreinados")
-                        # Limpar flag após sincronização bem-sucedida
-                        self.model_retrainer.models_updated.clear()
-
-                        # Log dos novos modelos
-                        logger.info(
-                            f"Modelos atualizados - TP: v{self.model_retrainer.tp_model.config.version}, "
-                            f"SL: v{self.model_retrainer.sl_model.config.version}"
-                        )
-                else:
-                    logger.warning("Signal Generator não possui método update_models")
-
-        except Exception as e:
-            logger.error(f"Erro ao verificar atualizações de modelo: {e}", exc_info=True)
 
     async def _log_system_summary(self) -> None:
         """Log do resumo do sistema com informações multi-timeframe."""
@@ -219,15 +146,6 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erro ao mostrar análise multi-timeframe: {e}")
 
-        # Adicionar informações sobre o retreinamento
-        retraining_status = self.model_retrainer.get_retraining_status()
-        logger.info("-" * 30)
-        logger.info("STATUS DO RETREINAMENTO")
-        logger.info(f"Status: {'Em andamento' if retraining_status['retraining_in_progress'] else 'Inativo'}")
-        logger.info(f"Último retreinamento: {retraining_status['last_retraining_time']}")
-        logger.info(f"Horas desde último retreinamento: {retraining_status['hours_since_last_retraining']:.1f}")
-        logger.info(f"Versão TP/SL: {retraining_status['tp_model_version']}/{retraining_status['sl_model_version']}")
-
         # Adicionar métricas de performance
         try:
             metrics = self.performance_monitor.metrics
@@ -252,70 +170,15 @@ class TradingBot:
         logger.info(f"Estratégia atual: {self.current_strategy_name}")
         if hasattr(self, 'strategy_manager'):
             strategy_details = self.strategy_manager.get_strategy_details()
-            if strategy_details['active']:
-                config = strategy_details['config']
+            if strategy_details.active:
+                config = strategy_details.config
                 logger.info(f"Configuração da estratégia: "
-                            f"TP ajuste={config.get('tp_adjustment', 1.0)}, "
-                            f"SL ajuste={config.get('sl_adjustment', 1.0)}")
-                logger.info(
-                    f"Min R:R={config.get('min_rr_ratio', 1.5)}, Threshold={config.get('entry_threshold', 0.6)}")
+                            f"TP ajuste={config.tp_adjustment}, "
+                            f"SL ajuste={config.sl_adjustment}")
+                logger.info(f"Min R:R={config.min_rr_ratio}, Threshold={config.entry_threshold}")
 
         logger.info("=" * 50)
 
-    async def add_multi_timeframe_analysis(self, signal, df):
-        """
-        Adiciona análise multi-timeframe ao sinal de trading.
-
-        Args:
-            signal: Sinal de trading gerado
-            df: DataFrame do timeframe atual
-
-        Returns:
-            Sinal enriquecido com análise multi-timeframe e booleano indicando se deve prosseguir
-        """
-        if not signal:
-            return None, False
-
-        try:
-            # Executar análise multi-timeframe
-            mtf_trend, confidence, details = await self.multi_tf_analyzer.analyze_multi_timeframe_trend()
-
-            # Verificar alinhamento do sinal com a tendência multi-timeframe
-            trade_direction = signal.direction
-            alignment_score, confidence = await self.multi_tf_analyzer.get_trend_alignment(trade_direction)
-
-            # Adicionar informações ao sinal
-            signal.mtf_trend = mtf_trend
-            signal.mtf_alignment = alignment_score
-            signal.mtf_confidence = confidence
-            signal.mtf_details = details["tf_summary"]
-
-            # Verificar se o alinhamento é suficiente para executar o trade
-            MIN_MTF_ALIGNMENT = 0.3  # Mínimo alinhamento para prosseguir
-            should_proceed = alignment_score >= MIN_MTF_ALIGNMENT
-
-            if not should_proceed:
-                logger.info(
-                    f"Sinal {trade_direction} rejeitado - Baixo alinhamento multi-timeframe: "
-                    f"{alignment_score:.2f} < {MIN_MTF_ALIGNMENT}"
-                )
-            else:
-                logger.info(
-                    f"Análise multi-timeframe para sinal {trade_direction}: "
-                    f"Tendência MTF={mtf_trend}, Alinhamento={alignment_score:.2f}, "
-                    f"Confiança={confidence:.2f}"
-                )
-
-                # Logar detalhes dos timeframes para análise
-                for tf, info in details["tf_summary"].items():
-                    logger.info(f"  Timeframe {tf}: {info['strength']}, Score: {info['score']:.2f}")
-
-            return signal, should_proceed
-
-        except Exception as e:
-            logger.error(f"Erro na análise multi-timeframe: {e}", exc_info=True)
-            # Em caso de erro, prosseguir normalmente sem a análise MTF
-            return signal, True
 
     async def run(self) -> None:
         """
@@ -333,7 +196,7 @@ class TradingBot:
 
             while True:
                 self.cycle_count += 1
-                logger.debug(f"Iniciando ciclo {self.cycle_count}")
+                logger.info(f"Iniciando ciclo {self.cycle_count}")
 
                 # A cada 10 ciclos, mostra um resumo do sistema
                 if self.cycle_count % 10 == 0:
@@ -342,14 +205,6 @@ class TradingBot:
                     # Adicionar resumo de performance a cada 30 ciclos
                     if self.cycle_count % 30 == 0:
                         self.performance_monitor.log_performance_summary()
-
-                # Periodicamente verificar o status do retreinamento
-                if self.cycle_count % self.check_retraining_status_interval == 0:
-                    retraining_status = self.model_retrainer.get_retraining_status()
-                    logger.info(f"Status do retreinamento: {retraining_status}")
-
-                # Verificar atualizações de modelo
-                await self.check_model_updates()
 
                 # Processar trades completados para fornecer dados ao retreinador
                 await self.trade_processor.process_completed_trades()
@@ -364,6 +219,7 @@ class TradingBot:
                 # 2. Verificar posições abertas
                 has_position = await self.order_executor.check_positions()
                 if has_position:
+                    logger.info("Posição existente detectada. Aguardando fechamento.")
                     await asyncio.sleep(5)
                     continue
 
@@ -380,10 +236,18 @@ class TradingBot:
                 # Atualizar a estratégia atual para o resumo do sistema
                 self.current_strategy_name = market_analysis.strategy_name
 
-                # 5. Gerar sinal de trading passando a estratégia atual
-                current_strategy = market_analysis.strategy
-                signal = await self.signal_generator.generate_signal(df, current_price, current_strategy)
-                if not signal:
+                # 5. Tentar gerar sinal de trading usando o gerenciador de estratégias
+                # Adicionar log detalhado antes da tentativa de geração
+                logger.info(
+                    f"Tentando gerar sinal com estratégia: {self.current_strategy_name}, preço: {current_price}")
+                signal = await self.strategy_manager.generate_signal(df, current_price)
+                if signal:
+                    logger.info(
+                        f"Sinal gerado: {signal.direction}, TP: {signal.predicted_tp_pct:.2f}%, "
+                        f"SL: {signal.predicted_sl_pct:.2f}%, R:R: {signal.rr_ratio:.2f}"
+                    )
+                else:
+                    logger.info("Nenhum sinal gerado neste ciclo")
                     await asyncio.sleep(5)
                     continue
 
@@ -399,8 +263,12 @@ class TradingBot:
                     continue
 
                 # 7. Executar ordem (só chegamos aqui se o sinal foi aprovado)
+                logger.info(f"Executando ordem: {signal.direction} em {current_price}")
                 order_result = await self.order_executor.execute_order(signal)
-                if not order_result.success:
+
+                if order_result.success:
+                    logger.info(f"Ordem executada com sucesso! ID: {order_result.order_id}")
+                else:
                     logger.warning(f"Falha na execução da ordem: {order_result.error_message}")
 
                 await asyncio.sleep(5)

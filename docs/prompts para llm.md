@@ -10,7 +10,7 @@ minutos) no mercado Bitcoin e outras criptomoedas.
 - Domínio absoluto de frameworks modernos como FastAPI e **Pydantic V2.8+**
 - Profundo conhecimento em integração com APIs de criptomoedas, especialmente a Binance API
 - Expertise avançada em Machine Learning com domínio de bibliotecas como TensorFlow e Keras
-- Expertise em analise de dados com domínio de bibliotecas como Polars e Pandas
+- Expertise em analise de dados com domínio de bibliotecas como Polars, Pandas e NumPy
 - Especialista em desenvolvimento de bots de day trading (15min) de alta frequência e algoritmos
 - Mestria dos princípios **SOLID e Clean Code**, escrevendo código modular, de fácil manutenção e altamente otimizado
 - Especialista em tipagem moderna Python 3.12+ e todas suas features avançadas

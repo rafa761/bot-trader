@@ -6,7 +6,6 @@ from core.config import settings
 from core.logger import logger
 from services.base.interfaces import ITradeProcessor, IOrderExecutor
 from services.base.schemas import TradeResultDetails, ExecutedOrder
-from services.base.services import SignalGenerator
 from services.binance.binance_client import BinanceClient
 from services.performance_monitor import TradePerformanceMonitor
 
@@ -23,7 +22,7 @@ class TradeProcessor(ITradeProcessor):
     def __init__(
             self,
             binance_client: BinanceClient,
-            signal_generator: SignalGenerator,
+            signal_generator: None,
             performance_monitor: TradePerformanceMonitor | None = None,
             order_executor: IOrderExecutor = None
     ):
@@ -32,7 +31,7 @@ class TradeProcessor(ITradeProcessor):
 
         Args:
             binance_client: Cliente da Binance para consulta de trades
-            signal_generator: Gerador de sinais para registrar resultados reais
+            signal_generator: Mantido para compatibilidade (pode ser None)
             performance_monitor: Monitor de performance para atualizar métricas
             order_executor: Executor de ordens para acessar as ordens executadas
         """
@@ -277,27 +276,6 @@ class TradeProcessor(ITradeProcessor):
                                     logger.warning(f"Trade com signal_id {signal_id} não encontrado no monitor")
                             except Exception as e:
                                 logger.error(f"Erro ao registrar saída de trade no monitor: {e}")
-
-                        # Registrar dados para o retreinamento
-                        if result_type == "TP":
-                            actual_tp_pct = trade_result["actual_tp_pct"]
-                            predicted_tp_pct = order.get("predicted_tp_pct", 0)
-
-                            # Verificar se o signal_generator tem o método para registrar valores reais
-                            if hasattr(self.signal_generator, "record_actual_values"):
-                                self.signal_generator.record_actual_values(signal_id, actual_tp_pct, 0, None)
-                            else:
-                                logger.warning("SignalGenerator não possui método record_actual_values")
-
-                        elif result_type == "SL":
-                            actual_sl_pct = trade_result["actual_sl_pct"]
-                            predicted_sl_pct = order.get("predicted_sl_pct", 0)
-
-                            # Verificar se o signal_generator tem o método para registrar valores reais
-                            if hasattr(self.signal_generator, "record_actual_values"):
-                                self.signal_generator.record_actual_values(signal_id, 0, actual_sl_pct, None)
-                            else:
-                                logger.warning("SignalGenerator não possui método record_actual_values")
 
                         # Marcar ordem como processada
                         self.order_executor.mark_order_as_processed(order_id)
