@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.base.schemas import TradingSignal, OrderResult, ExecutedOrder
-    from services.performance_monitor import Trade, PerformanceMetrics
 
 
 class IOrderExecutor(ABC):

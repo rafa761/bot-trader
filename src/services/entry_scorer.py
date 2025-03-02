@@ -1,5 +1,4 @@
 # services/entry_scorer.py
-from typing import Dict
 
 import pandas as pd
 

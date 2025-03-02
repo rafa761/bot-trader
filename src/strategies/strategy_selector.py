@@ -3,6 +3,7 @@
 import pandas as pd
 
 from core.logger import logger
+from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
 from strategies.base.model import BaseStrategy, IMarketStrategy, MarketCondition
 from strategies.downtrend_strategy import DowntrendStrategy
@@ -17,15 +18,15 @@ class StrategySelector:
     Implementa o padrão Strategy do GoF para permitir a troca dinâmica da estratégia em tempo de execução.
     """
 
-    def __init__(self):
+    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
         """Inicializa o seletor de estratégias com todas as estratégias disponíveis."""
         # Inicializar todas as estratégias
         self.strategies: dict[MarketCondition, IMarketStrategy] = {
-            MarketCondition.UPTREND: UptrendStrategy(),
-            MarketCondition.DOWNTREND: DowntrendStrategy(),
-            MarketCondition.RANGE: RangeStrategy(),
-            MarketCondition.HIGH_VOLATILITY: HighVolatilityStrategy(),
-            MarketCondition.LOW_VOLATILITY: LowVolatilityStrategy()
+            MarketCondition.UPTREND: UptrendStrategy(tp_model, sl_model),
+            MarketCondition.DOWNTREND: DowntrendStrategy(tp_model, sl_model),
+            MarketCondition.RANGE: RangeStrategy(tp_model, sl_model),
+            MarketCondition.HIGH_VOLATILITY: HighVolatilityStrategy(tp_model, sl_model),
+            MarketCondition.LOW_VOLATILITY: LowVolatilityStrategy(tp_model, sl_model)
         }
 
         # Estratégia atual
@@ -92,7 +93,7 @@ class StrategySelector:
 
         return selected_strategy
 
-    def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
+    async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
         Gera um sinal de trading usando a estratégia mais adequada.
 
@@ -111,7 +112,7 @@ class StrategySelector:
             return None
 
         # Usar a estratégia para gerar um sinal
-        return strategy.generate_signal(df, current_price, mtf_data)
+        return await strategy.generate_signal(df, current_price, mtf_data)
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
@@ -125,8 +126,11 @@ class StrategySelector:
         Returns:
             Sinal ajustado
         """
-        # Selecionar a estratégia mais adequada
-        strategy = self.select_strategy(df, mtf_data)
+        # Usar a estratégia atual ou selecionar uma nova se não houver
+        strategy = self.current_strategy
+        if strategy is None:
+            strategy = self.select_strategy(df, mtf_data)
+
         if strategy is None:
             logger.warning("Nenhuma estratégia selecionada para ajustar sinal, usando padrão")
             strategy = self.strategies[MarketCondition.UPTREND]
@@ -134,15 +138,15 @@ class StrategySelector:
         # Usar a estratégia para ajustar o sinal
         return strategy.adjust_signal(signal, df, mtf_data)
 
-    def register_custom_strategy(self, condition: MarketCondition, strategy_class: type[BaseStrategy]) -> None:
+    def register_custom_strategy(self, condition: MarketCondition, strategy: BaseStrategy) -> None:
         """
         Registra uma estratégia personalizada para uma condição específica.
 
         Args:
             condition: Condição de mercado
-            strategy_class: Classe da estratégia personalizada
+            strategy: Estratégia personalizada
         """
-        self.strategies[condition] = strategy_class()
+        self.strategies[condition] = strategy
         self.strategy_list = list(self.strategies.values())
         logger.info(f"Estratégia personalizada registrada para condição {condition}")
 

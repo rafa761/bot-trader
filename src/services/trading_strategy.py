@@ -5,6 +5,7 @@ import math
 from core.config import settings
 from core.logger import logger
 from services.risk_reward_manager import RiskRewardManager
+from strategies.strategy_manager import StrategyManager
 
 
 class TradingStrategy:
@@ -66,8 +67,8 @@ class TradingStrategy:
             logger.info(f"Sinal neutro: TP={predicted_tp_pct:.2f}% dentro do threshold ({threshold})")
             return None
 
+    @staticmethod
     def calculate_trade_quantity(
-            self,
             capital: float,
             current_price: float,
             leverage: float,
@@ -129,7 +130,8 @@ class TradingStrategy:
 
         return quantity
 
-    def adjust_price_to_tick_size(self, price: float, tick_size: float) -> float:
+    @staticmethod
+    def adjust_price_to_tick_size(price: float, tick_size: float) -> float:
         """
         Arredonda 'price' para baixo (floor) ao múltiplo de tick_size.
 
@@ -139,7 +141,8 @@ class TradingStrategy:
         """
         return math.floor(price / tick_size) * tick_size
 
-    def format_price_for_tick_size(self, price: float, tick_size: float) -> str:
+    @staticmethod
+    def format_price_for_tick_size(price: float, tick_size: float) -> str:
         """
         Formata 'price' com a quantidade correta de casas decimais
         baseada no tick_size.
@@ -153,7 +156,8 @@ class TradingStrategy:
             decimals = len(str(tick_size).split('.')[-1])
         return f"{price:.{decimals}f}"
 
-    def adjust_quantity_to_step_size(self, qty: float, step_size: float) -> float:
+    @staticmethod
+    def adjust_quantity_to_step_size(qty: float, step_size: float) -> float:
         """
         Arredonda 'qty' para o múltiplo do step_size.
 
@@ -226,7 +230,6 @@ class TradingStrategy:
 
         # Verificar se temos uma estratégia ativa no StrategyManager
         try:
-            from strategies.strategy_manager import StrategyManager
             strategy_manager = StrategyManager()
             current_strategy = strategy_manager.strategy_selector.get_current_strategy()
             use_strategy_config = current_strategy is not None

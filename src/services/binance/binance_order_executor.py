@@ -1,6 +1,6 @@
 # services/binance/binance_order_executor.py
-
 import datetime
+import math
 from typing import Any, Literal
 
 from core.config import settings
@@ -13,7 +13,6 @@ from services.base.schemas import (
     TPSLResult
 )
 from services.binance.binance_client import BinanceClient
-from services.performance_monitor import TradePerformanceMonitor
 from services.trading_strategy import TradingStrategy
 
 
@@ -29,7 +28,6 @@ class BinanceOrderExecutor(IOrderExecutor):
             self,
             binance_client: BinanceClient,
             strategy: TradingStrategy,
-            performance_monitor: TradePerformanceMonitor | None = None,
             tick_size: float = 0.0,
             step_size: float = 0.0
     ):
@@ -39,13 +37,11 @@ class BinanceOrderExecutor(IOrderExecutor):
         Args:
             binance_client: Cliente da Binance para operações na exchange
             strategy: Estratégia de trading para cálculos de ordens
-            performance_monitor: Monitor de performance para registrar trades
             tick_size: Tamanho do tick para o par de trading
             step_size: Tamanho do step para o par de trading
         """
         self.client = binance_client
         self.strategy = strategy
-        self.performance_monitor = performance_monitor
         self.tick_size = tick_size
         self.step_size = step_size
 
@@ -219,7 +215,6 @@ class BinanceOrderExecutor(IOrderExecutor):
 
             if notional_value < min_notional:
                 # Recalcular quantidade para atender ao mínimo da Binance com margem de segurança
-                import math
                 min_qty = (min_notional * 1.1) / signal.current_price  # 10% acima para segurança
 
                 # Garantir que seja múltiplo exato do step_size
@@ -276,53 +271,17 @@ class BinanceOrderExecutor(IOrderExecutor):
                 if len(self.executed_orders) > self.max_order_history:
                     self.executed_orders.pop(0)
 
-                # Registrar o trade no monitor de performance
-                if self.performance_monitor is not None:
-                    try:
-                        # Garantir que temos todos os dados necessários
-                        market_trend = getattr(signal, 'market_trend', None)
-                        market_strength = getattr(signal, 'market_strength', None)
+                # Coloca as ordens de TP e SL
+                tp_sl_result = await self.place_tp_sl(
+                    signal.direction,
+                    signal.current_price,
+                    signal.tp_price,
+                    signal.sl_price
+                )
 
-                        # Calcular volatilidade
-                        volatility = None
-                        if signal.atr_value:
-                            volatility = (signal.atr_value / signal.current_price) * 100
-
-                        self.performance_monitor.register_trade_from_signal(
-                            signal_id=signal.id,
-                            direction=signal.direction,
-                            entry_price=signal.current_price,
-                            quantity=qty_adj,
-                            tp_target_price=signal.tp_price,
-                            sl_target_price=signal.sl_price,
-                            predicted_tp_pct=signal.predicted_tp_pct,
-                            predicted_sl_pct=signal.predicted_sl_pct,
-                            market_trend=market_trend,
-                            market_volatility=volatility,
-                            market_strength=market_strength,
-                            entry_score=signal.entry_score if hasattr(signal, 'entry_score') else None,
-                            rr_ratio=signal.rr_ratio if hasattr(signal, 'rr_ratio') else None,
-                            leverage=settings.LEVERAGE,
-                            trade_id=str(order_resp.get("orderId"))
-                        )
-                        logger.info(f"Trade {signal.id} registrado no monitor de performance")
-                    except Exception as e:
-                        logger.error(f"Erro ao registrar trade no monitor de performance: {e}")
-
-                    # Coloca as ordens de TP e SL
-                    tp_sl_result = await self.place_tp_sl(
-                        signal.direction,
-                        signal.current_price,
-                        signal.tp_price,
-                        signal.sl_price
-                    )
-
-                    # Extrair order_id da resposta
-                    order_id = order_resp.get("orderId", "N/A")
-                    return OrderResult(success=True, order_id=str(order_id))
-                else:
-                    logger.info("Não foi possível colocar ordem de abertura.")
-                    return OrderResult(success=False, error_message="Falha ao colocar ordem")
+                # Extrair order_id da resposta
+                order_id = order_resp.get("orderId", "N/A")
+                return OrderResult(success=True, order_id=str(order_id))
 
         except Exception as e:
             error_msg = f"Erro ao executar ordem: {e}"

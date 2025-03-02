@@ -123,8 +123,9 @@ class MarketTrendAnalyzer:
 
         return entry_threshold, tp_adjustment, sl_adjustment
 
+    @staticmethod
     def adjust_signal_parameters(
-            self, signal: TradingSignal, tp_adjustment: float, sl_adjustment: float
+            signal: TradingSignal, tp_adjustment: float, sl_adjustment: float
     ) -> TradingSignal:
         """
         Ajusta os parâmetros do sinal com base nos fatores de ajuste.
@@ -217,8 +218,9 @@ class MarketTrendAnalyzer:
 
         return signal
 
+    @staticmethod
     def log_technical_analysis(
-            self, direction: str, trend_direction: str, entry_score: float, threshold: float,
+            direction: str, trend_direction: str, entry_score: float, threshold: float,
             mtf_trend: str = None
     ) -> None:
         """
