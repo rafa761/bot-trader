@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from core.config import settings
 from core.constants import TRAIN_DATA_DIR
 from core.logger import logger
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 
 
 class DataHandler:
@@ -267,38 +267,36 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    sma_windows: tuple[int, int] = (5, 20)  # Reduzidos de (10, 50) para maior sensibilidade
-    ema_windows: tuple[int, int] = (8, 21)  # Reduzidos de (12, 26) para maior reatividade
+    ema_windows: tuple[int, int] = (5, 15)  # Mais curtas para maior sensibilidade
+
+    # Hull Moving Average - excelente para day trading
+    hull_window: int = 9  # Reduzido para maior reatividade
 
     # Indicadores de volatilidade otimizados
-    bollinger_window: int = 20  # Reduzido de 21 para maior sensibilidade
-    bollinger_std: float = 2.0  # Desvio padrão padrão para as bandas
-    keltner_window: int = 14  # Reduzido de 20 para maior sensibilidade no day trading
-    keltner_atr_multiplier: float = 1.5  # Multiplicador padrão para Keltner
-    atr_window: int = 14  # Mantido - funciona bem para timeframe de 15min
+    bollinger_window: int = 14  # Reduzido para maior sensibilidade
+    bollinger_std: float = 2.0  # Mantido
+    atr_window: int = 10  # Reduzido para maior sensibilidade
 
     # Osciladores otimizados para day trading
-    rsi_window: int = 9  # Reduzido de 14 para maior sensibilidade
-    stoch_k_window: int = 9  # Reduzido de 14 para maior sensibilidade
+    rsi_window: int = 7  # Reduzido para maior sensibilidade
+    stoch_k_window: int = 7  # Reduzido para maior sensibilidade
     stoch_d_window: int = 3  # Mantido
-    stoch_smooth_k: int = 3  # Suavização adicional do %K
-    cci_window: int = 14  # Reduzido de 20 para maior sensibilidade
+    stoch_smooth_k: int = 2  # Menos suavização para maior reatividade
 
     # MACD otimizado para 15min
-    macd_windows: tuple[int, int, int] = (19, 9, 9)  # Ajustado de (26, 12, 9)
-    volume_macd_windows: tuple[int, int, int] = (19, 9, 9)  # Consistente com MACD regular
+    macd_windows: tuple[int, int, int] = (15, 7, 9)  # Ajustado para maior sensibilidade
 
     # Outros indicadores otimizados
     vwap_window: int = 14  # Mantido
-    adx_window: int = 10  # Reduzido de 14 para maior sensibilidade
-    roc_window: int = 9  # Reduzido de 12 para maior sensibilidade
+    adx_window: int = 8  # Reduzido para maior sensibilidade
 
-    # Novos indicadores específicos para day trading
-    supertrend_atr_multiplier: float = 2.5  # Multiplicador para o SuperTrend
-    supertrend_atr_period: int = 10  # Período do ATR para o SuperTrend
-    heikin_ashi_enabled: bool = True  # Habilitar cálculo de velas Heikin Ashi
-    volume_profile_zones: int = 10  # Número de zonas para o perfil de volume
-    pivot_lookback: int = 5  # Períodos para calcular pivôs intradiários
+    # Supertrend - crítico para day trading
+    supertrend_atr_multiplier: float = 2.0  # Ajustado para ser mais reativo
+    supertrend_atr_period: int = 7  # Reduzido para maior sensibilidade
+
+    # Outros parâmetros
+    heikin_ashi_enabled: bool = True  # Manter - excelente para clareza em 15min
+    pivot_lookback: int = 3  # Reduzido para capturar pivôs mais recentes
 
 
 class TechnicalIndicatorAdder:
@@ -316,18 +314,14 @@ class TechnicalIndicatorAdder:
 
         # Definir o tamanho mínimo necessário para os indicadores
         min_size = max(
-            config.sma_windows[1],
             config.bollinger_window,
             config.ema_windows[1],
             config.rsi_window,
             config.stoch_k_window + config.stoch_d_window,
-            config.cci_window,
             config.macd_windows[0],
             config.atr_window,
-            config.keltner_window,
             config.vwap_window,
             config.adx_window,
-            config.roc_window,
             config.supertrend_atr_period + 5,  # SuperTrend
             config.pivot_lookback * 2  # Pivôs intradiários
         )
@@ -355,18 +349,6 @@ class TechnicalIndicatorAdder:
                 df['ha_close'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
                 df['ha_high'] = df[['high', 'ha_open', 'ha_close']].max(axis=1)
                 df['ha_low'] = df[['low', 'ha_open', 'ha_close']].min(axis=1)
-
-            ## Indicadores de Tendência
-            # Médias Móveis Simples (SMA) mais curtas para day trading
-            df['sma_short'] = ta.trend.SMAIndicator(
-                close=df['close'],
-                window=config.sma_windows[0],
-            ).sma_indicator()
-
-            df['sma_long'] = ta.trend.SMAIndicator(
-                close=df['close'],
-                window=config.sma_windows[1]
-            ).sma_indicator()
 
             # Exponential Moving Average (EMA) ajustadas para day trading
             df['ema_short'] = ta.trend.EMAIndicator(
@@ -476,25 +458,9 @@ class TechnicalIndicatorAdder:
             # ATR percentual (ATR relativo ao preço) - mais útil para decisões em day trading
             df['atr_pct'] = (df['atr'] / df['close']) * 100
 
-            # Keltner Channels - alternativa à Bollinger para confirmação
-            keltner = ta.volatility.KeltnerChannel(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                window=config.keltner_window,
-                window_atr=config.atr_window,
-                original_version=False,
-                multiplier=config.keltner_atr_multiplier
-            )
-            df['keltner_hband'] = keltner.keltner_channel_hband()
-            df['keltner_lband'] = keltner.keltner_channel_lband()
-            df['keltner_mband'] = keltner.keltner_channel_mband()
-            df['keltner_width'] = (df['keltner_hband'] - df['keltner_lband']) / df['keltner_mband']
-
-            # Squeeze Momentum Indicator (Bollinger Bands vs Keltner Channel)
+            # Squeeze Momentum Indicator
             # Identifica quando o mercado está "comprimido" e prestes a explodir
-            df['squeeze'] = ((df['boll_hband'] <= df['keltner_hband']) &
-                             (df['boll_lband'] >= df['keltner_lband'])).astype(float)
+            df['squeeze'] = ((df['boll_width'] / df['boll_mavg']) < 0.1).astype(float)
 
             # TTM Squeeze momentum
             df['ttm_squeeze'] = ta.momentum.ROCIndicator(
@@ -534,14 +500,6 @@ class TechnicalIndicatorAdder:
                 smooth2=3
             ).stochrsi()
 
-            # Commodity Channel Index (CCI) - período mais curto
-            df['cci'] = ta.trend.CCIIndicator(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                window=config.cci_window
-            ).cci()
-
             # MACD otimizado para day trading
             macd = ta.trend.MACD(
                 close=df['close'],
@@ -552,42 +510,6 @@ class TechnicalIndicatorAdder:
             df['macd'] = macd.macd_diff()
             df['macd_signal'] = macd.macd_signal()
             df['macd_histogram'] = df['macd'] - df['macd_signal']
-
-            # Volume MACD
-            volume_macd = ta.trend.MACD(
-                close=df['volume'],
-                window_slow=config.volume_macd_windows[0],
-                window_fast=config.volume_macd_windows[1],
-                window_sign=config.volume_macd_windows[2]
-            )
-            df['volume_macd'] = volume_macd.macd_diff()
-
-            # Rate of Change (ROC) - período mais curto para day trading
-            df['roc'] = ta.momentum.ROCIndicator(
-                close=df['close'],
-                window=config.roc_window
-            ).roc()
-
-            # Williams %R - excelente para identificar sobrecompra/sobrevenda
-            df['williams_r'] = ta.momentum.WilliamsRIndicator(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                lbp=14
-            ).williams_r()
-
-            # Ultimate Oscillator - considera múltiplos timeframes
-            df['ultimate_osc'] = ta.momentum.UltimateOscillator(
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                window1=7,
-                window2=14,
-                window3=28,
-                weight1=4.0,
-                weight2=2.0,
-                weight3=1.0
-            ).ultimate_oscillator()
 
             ## Indicadores de Volume e Fluxo de Dinheiro
             # On-Balance Volume (OBV)
@@ -617,48 +539,6 @@ class TechnicalIndicatorAdder:
             # VWAP Distance - posição relativa do preço vs VWAP
             df['vwap_distance'] = ((df['close'] - df['vwap']) / df['vwap']) * 100
 
-            # Volume Profile simplificado para níveis de suporte/resistência
-            price_range = df['high'].max() - df['low'].min()
-            zone_size = price_range / config.volume_profile_zones
-
-            # Criar zonas de preço
-            df['price_zone'] = ((df['close'] - df['low'].min()) / zone_size).astype(float)
-
-            # Calcular volume por zona de preço (últimas 100 barras)
-            recent_df = df.tail(min(100, len(df)))
-            # Arredondar para categorizar em zonas inteiras
-            recent_df['zone_int'] = recent_df['price_zone'].astype(int)
-            volume_profile = recent_df.groupby('zone_int')['volume'].sum()
-
-            # Adicionar volume da zona atual
-            df['zone_int'] = df['price_zone'].astype(int)
-            df['zone_volume'] = 0.0  # Inicializar com zeros
-
-            for zone, volume in volume_profile.items():
-                df.loc[df['zone_int'] == zone, 'zone_volume'] = float(volume)
-
-            # Identificar zonas de alto volume (possíveis suportes/resistências)
-            # Garantir que temos pelo menos uma zona
-            if len(volume_profile) > 0:
-                high_volume_zones = volume_profile.nlargest(min(3, len(volume_profile))).index.tolist()
-
-                # Garantir que sempre criamos as 3 colunas, mesmo que com valores padrão
-                for i in range(3):
-                    zone_name = f'vol_zone_{i + 1}'
-
-                    if i < len(high_volume_zones):
-                        zone = high_volume_zones[i]
-                        zone_price = df['low'].min() + (zone * zone_size) + (zone_size / 2)
-                        df[zone_name] = zone_price
-                    else:
-                        # Se não tivermos zonas suficientes, usar um valor padrão
-                        df[zone_name] = df['close'].mean()
-            else:
-                # Se não conseguimos calcular zonas, usar valores padrão
-                df['vol_zone_1'] = df['close'].mean()
-                df['vol_zone_2'] = df['close'].mean()
-                df['vol_zone_3'] = df['close'].mean()
-
             ## Indicadores de Tendência e Direção
             # Average Directional Index (ADX) - mais sensível
             adx = ta.trend.ADXIndicator(
@@ -678,30 +558,6 @@ class TechnicalIndicatorAdder:
             df.loc[(df['adx'] > 25) & (df['adx'] <= 35), 'trend_strength'] = 'Moderada'
             df.loc[(df['adx'] > 35) & (df['adx'] <= 50), 'trend_strength'] = 'Forte'
             df.loc[df['adx'] > 50, 'trend_strength'] = 'Extrema'
-
-            # Ichimoku Cloud componentes (simplificado para day trading)
-            # Tenkan-sen (Linha de conversão)
-            df['tenkan_sen'] = (df['high'].rolling(window=9).max() + df['low'].rolling(window=9).min()) / 2
-            # Kijun-sen (Linha base)
-            df['kijun_sen'] = (df['high'].rolling(window=26).max() + df['low'].rolling(window=26).min()) / 2
-            # Senkou Span A (Linha de lidnos espans)
-            df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
-            # Senkou Span B (Linha de lidnos espans)
-            df['senkou_span_b'] = (
-                    (df['high'].rolling(window=52).max() + df['low'].rolling(window=52).min()) / 2).shift(26)
-            # Chikou Span (Linha atrasada) - preço de fechamento deslocado para trás
-            df['chikou_span'] = df['close'].shift(-26)
-
-            # Ichimoku sinais
-            df['cloud_green'] = (df['senkou_span_a'] > df['senkou_span_b']).astype(float)
-            df['price_above_cloud'] = (
-                    (df['close'] > df['senkou_span_a']) & (df['close'] > df['senkou_span_b'])).astype(float)
-            df['price_below_cloud'] = (
-                    (df['close'] < df['senkou_span_a']) & (df['close'] < df['senkou_span_b'])).astype(float)
-            df['tk_cross_bull'] = ((df['tenkan_sen'] > df['kijun_sen']) & (
-                    df['tenkan_sen'].shift(1) <= df['kijun_sen'].shift(1))).astype(float)
-            df['tk_cross_bear'] = ((df['tenkan_sen'] < df['kijun_sen']) & (
-                    df['tenkan_sen'].shift(1) >= df['kijun_sen'].shift(1))).astype(float)
 
             # Pivôs intradiários - essenciais para day trading
             df['pivot'] = np.nan
@@ -771,7 +627,7 @@ class TechnicalIndicatorAdder:
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
             # Remover colunas temporárias e auxiliares
-            df.drop(['raw_hma', 'rsi_prev', 'price_prev', 'price_zone', 'zone_int'],
+            df.drop(['raw_hma', 'rsi_prev', 'price_prev'],
                     axis=1, errors='ignore', inplace=True)
 
             # Preencher NaN com forward fill e depois com backward fill

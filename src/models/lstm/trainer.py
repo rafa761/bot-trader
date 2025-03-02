@@ -74,11 +74,11 @@ class LSTMTrainer(BaseTrainer):
         try:
             # Learning rate schedule personalizado
             def lr_scheduler(epoch, lr):
-                if epoch < 10:
+                if epoch < 5:
                     return lr  # Manter taxa inicial para warm-up
                 else:
                     # Decay exponencial suave
-                    return self.model.config.learning_rate * math.exp(-0.025 * (epoch - 10))
+                    return self.model.config.learning_rate * math.exp(-0.015 * (epoch - 5))
 
             callbacks = [
                 LearningRateScheduler(lr_scheduler, verbose=1),

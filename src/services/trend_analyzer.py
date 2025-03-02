@@ -1,12 +1,12 @@
 # services/trend_analyzer.py
 import asyncio
 from enum import Enum
-from typing import Dict, Tuple, Any
+from typing import Any
 
 import pandas as pd
 
 from core.logger import logger
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 
 
 class TimeFrame(str, Enum):

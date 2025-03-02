@@ -12,15 +12,13 @@ FEATURE_COLUMNS = [
     "volume",
 
     # Médias móveis
-    "sma_short",
-    "sma_long",
     "ema_short",
     "ema_long",
-    "hma",  # Nova média móvel Hull
+    "hma",  # Hull MA - excelente para reduzir lag em timeframes curtos
 
     # Indicadores de tendência
     "parabolic_sar",
-    "supertrend",  # Novo indicador
+    "supertrend",
     "supertrend_direction",  # Direção do SuperTrend (-1 ou 1)
 
     # Velas Heikin Ashi
@@ -33,75 +31,51 @@ FEATURE_COLUMNS = [
     "rsi",
     "stoch_k",
     "stoch_d",
-    "stoch_rsi",  # Novo - Stochastic RSI
-    "cci",
+    "stoch_rsi",
     "macd",
-    "macd_signal",  # Novo - linha de sinal do MACD
-    "macd_histogram",  # Novo - histograma do MACD
-    "williams_r",  # Novo - Williams %R
-    "ultimate_osc",  # Novo - Ultimate Oscillator
+    "macd_signal",
+    "macd_histogram",
 
     # Divergências de RSI
-    "rsi_divergence_bull",  # Novo - divergência de alta
-    "rsi_divergence_bear",  # Novo - divergência de baixa
+    "rsi_divergence_bull",  # divergência de alta
+    "rsi_divergence_bear",  # divergência de baixa
 
     # Indicadores de volatilidade
     "atr",
-    "atr_pct",  # Novo - ATR como percentual do preço
+    "atr_pct",  # ATR como percentual do preço
     "boll_hband",
     "boll_lband",
-    "boll_mavg",  # Novo - média móvel das Bollinger
+    "boll_mavg",  # média móvel das Bollinger
     "boll_width",
-    "boll_pct_b",  # Novo - %B de Bollinger (posição relativa)
-    "keltner_hband",
-    "keltner_lband",
-    "keltner_mband",  # Novo - média das Keltner
-    "keltner_width",  # Novo - largura das Keltner
-    "squeeze",  # Novo - indicador de squeeze
-    "ttm_squeeze",  # Novo - momentum TTM squeeze
+    "boll_pct_b",  # %B de Bollinger (posição relativa)
+    "squeeze",  # indicador de squeeze
+    "ttm_squeeze",  # momentum TTM squeeze
 
     # Indicadores de volume
     "obv",
-    "cmf",  # Novo - Chaikin Money Flow
+    "cmf",  # Chaikin Money Flow
     "vwap",
-    "vwap_distance",  # Novo - distância ao VWAP
-    "volume_macd",
-    "zone_volume",  # Novo - volume na zona de preço atual
-    "vol_zone_1",  # Novo - preço da zona de alto volume 1
-    "vol_zone_2",  # Novo - preço da zona de alto volume 2
-    "vol_zone_3",  # Novo - preço da zona de alto volume 3
+    "vwap_distance",
 
     # Indicadores direcionais
     "adx",
-    "di_plus",  # Novo - DI+ do ADX
-    "di_minus",  # Novo - DI- do ADX
-    "roc",
-
-    # Ichimoku Cloud
-    "tenkan_sen",  # Novo
-    "kijun_sen",  # Novo
-    "senkou_span_a",  # Novo
-    "senkou_span_b",  # Novo
-    "cloud_green",  # Novo - cloud é verde (bullish)
-    "price_above_cloud",  # Novo
-    "price_below_cloud",  # Novo
-    "tk_cross_bull",  # Novo - cruzamento TK de alta
-    "tk_cross_bear",  # Novo - cruzamento TK de baixa
+    "di_plus",  # DI+ do ADX
+    "di_minus",  # DI- do ADX
 
     # Níveis de pivô
-    "pivot",  # Novo
-    "pivot_r1",  # Novo - resistência 1
-    "pivot_r2",  # Novo - resistência 2
-    "pivot_s1",  # Novo - suporte 1
-    "pivot_s2",  # Novo - suporte 2
-    "pivot_resistance",  # Novo - flag de rejeição na resistência
-    "pivot_support",  # Novo - flag de rejeição no suporte
+    "pivot",
+    "pivot_r1",  # resistência 1
+    "pivot_r2",  # resistência 2
+    "pivot_s1",  # suporte 1
+    "pivot_s2",  # suporte 2
+    "pivot_resistance",  # flag de rejeição na resistência
+    "pivot_support",  # flag de rejeição no suporte
 
     # Classificação de mercado
-    "market_phase",  # Novo - fase do mercado (range, tendência alta, tendência baixa)
-    "volatility_class",  # Novo - classificação de volatilidade
-    "volume_ratio",  # Novo - volume comparado à média
-    "volume_class",  # Novo - classificação de volume
+    "market_phase",  # fase do mercado (range, tendência alta, tendência baixa)
+    "volatility_class",  # classificação de volatilidade
+    "volume_ratio",  # volume comparado à média
+    "volume_class",  # classificação de volume
 ]
 
 # Definir também quais indicadores são categóricos (para one-hot encoding)

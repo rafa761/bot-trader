@@ -1,4 +1,4 @@
-# services/binance_data_provider.py
+# services/binance/binance_data_provider.py
 
 import pandas as pd
 
@@ -7,7 +7,7 @@ from core.constants import FEATURE_COLUMNS
 from core.logger import logger
 from repositories.data_handler import DataHandler
 from services.base.services import MarketDataProvider
-from services.binance_client import BinanceClient
+from services.binance.binance_client import BinanceClient
 
 
 class BinanceDataProvider(MarketDataProvider):

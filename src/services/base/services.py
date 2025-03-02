@@ -1,11 +1,12 @@
 # services\base\services.py
-
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from services.base.schemas import OrderResult
-from services.base.schemas import TradingSignal
+if TYPE_CHECKING:
+    from services.base.schemas import OrderResult
+    from services.base.schemas import TradingSignal
 
 
 class MarketDataProvider(ABC):
@@ -31,7 +32,7 @@ class SignalGenerator(ABC):
     """Interface para geradores de sinais de trading."""
 
     @abstractmethod
-    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> TradingSignal | None:
+    async def generate_signal(self, df: pd.DataFrame, current_price: float) -> "TradingSignal | None":
         """Gera um sinal de trading baseado nos dados fornecidos."""
         pass
 
@@ -45,6 +46,6 @@ class OrderExecutor(ABC):
         pass
 
     @abstractmethod
-    async def execute_order(self, signal: TradingSignal) -> OrderResult:
+    async def execute_order(self, signal: "TradingSignal") -> "OrderResult":
         """Executa uma ordem baseada no sinal fornecido."""
         pass
