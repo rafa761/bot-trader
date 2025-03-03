@@ -3,7 +3,7 @@
 import asyncio
 import signal
 import sys
-from typing import Any
+from typing import Any, Literal
 
 from core.logger import logger
 from services.binance.binance_client import BinanceClient
@@ -126,10 +126,10 @@ class CleanupHandler:
 
                 # Determinar direção da posição e parâmetros para fechamento
                 if position_amt > 0:  # Posição LONG
-                    side = "SELL"
+                    side: Literal["SELL", "BUY"] = "SELL"
                     position_side = "LONG"
                 else:  # Posição SHORT
-                    side = "BUY"
+                    side: Literal["SELL", "BUY"] = "BUY"
                     position_side = "SHORT"
 
                 # Quantidade absoluta (remover sinal)

@@ -10,6 +10,8 @@ from core.config import settings
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
+from services.prediction.interfaces import IPredictionService
+from services.prediction.lstm_prediction import LSTMPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -35,11 +37,7 @@ class HighVolatilityStrategy(BaseStrategy):
             required_indicators=["adx", "atr", "atr_pct", "boll_width"]
         )
         super().__init__(config)
-        self.tp_model = tp_model
-        self.sl_model = sl_model
-        self.sequence_length = 24
-        self.preprocessor = None
-        self.preprocessor_fitted = False
+        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
@@ -259,104 +257,96 @@ class HighVolatilityStrategy(BaseStrategy):
         if signal_direction is None:
             return None
 
-        # Gerar previsões usando os modelos LSTM
-        try:
-            X_seq = self._prepare_sequence(df)
-            if X_seq is None:
-                return None
-
-            # Previsões com LSTM
-            predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
-            predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
-
-            # Ajustar direção do TP para SHORT
-            if signal_direction == "SHORT" and predicted_tp_pct > 0:
-                predicted_tp_pct = -predicted_tp_pct
-
-            # Garantir valores positivos para SL
-            predicted_sl_pct = abs(predicted_sl_pct)
-
-            logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-            # Validar previsões - evitar valores absurdos ou muito pequenos
-            if abs(predicted_tp_pct) > 20:
-                predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
-
-            if predicted_sl_pct > 10:
-                predicted_sl_pct = 10.0
-
-            # Em alta volatilidade, ajustar TP e SL para serem mais conservadores
-            if predicted_sl_pct < 0.5:
-                # Calcular o SL dinâmico baseado em ATR
-                atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-                if atr_value:
-                    # SL maior em alta volatilidade
-                    predicted_sl_pct = (atr_value / current_price) * 100 * 1.8
-                    logger.info(f"SL ajustado para alta volatilidade: {predicted_sl_pct:.2f}%")
-
-            # Aumentar TP em alta volatilidade para capturar mais do movimento
-            predicted_tp_pct = predicted_tp_pct * 1.3  # 30% maior
-
-            # Avaliar a qualidade da entrada
-            should_enter, entry_score = self.evaluate_entry_quality(
-                df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct
-            )
-
-            if not should_enter:
-                logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
-                return None
-
-            # Configurar parâmetros para o sinal
-            if signal_direction == "LONG":
-                side: Literal["SELL", "BUY"] = "BUY"
-                position_side: Literal["LONG", "SHORT"] = "LONG"
-                tp_factor = 1 + (predicted_tp_pct / 100)
-                sl_factor = 1 - (predicted_sl_pct / 100)
-            else:  # SHORT
-                side: Literal["SELL", "BUY"] = "SELL"
-                position_side: Literal["LONG", "SHORT"] = "SHORT"
-                tp_factor = 1 - (abs(predicted_tp_pct) / 100)
-                sl_factor = 1 + (predicted_sl_pct / 100)
-
-            # Calcular preços TP/SL
-            tp_price = current_price * tp_factor
-            sl_price = current_price * sl_factor
-
-            # Gerar ID único para o sinal
-            signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
-
-            # Obter ATR para ajustes de quantidade
-            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-
-            # Determinar tendência e força
-            market_trend = trend
-            market_strength = "HIGH_VOLATILITY"
-
-            signal = TradingSignal(
-                id=signal_id,
-                direction=signal_direction,
-                side=side,
-                position_side=position_side,
-                predicted_tp_pct=predicted_tp_pct,
-                predicted_sl_pct=predicted_sl_pct,
-                tp_price=tp_price,
-                sl_price=sl_price,
-                current_price=current_price,
-                tp_factor=tp_factor,
-                sl_factor=sl_factor,
-                atr_value=atr_value,
-                entry_score=entry_score,
-                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
-                market_trend=market_trend,
-                market_strength=market_strength,
-                timestamp=datetime.now()
-            )
-
-            return signal
-
-        except Exception as e:
-            logger.error(f"Erro na geração de sinal: {e}", exc_info=True)
+        prediction = self.prediction_service.predict_tp_sl(df, current_price, signal_direction)
+        if prediction is None:
             return None
+
+        predicted_tp_pct, predicted_sl_pct, atr_value = prediction
+
+        # Ajustar direção do TP para SHORT
+        if signal_direction == "SHORT" and predicted_tp_pct > 0:
+            predicted_tp_pct = -predicted_tp_pct
+
+        # Garantir valores positivos para SL
+        predicted_sl_pct = abs(predicted_sl_pct)
+
+        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
+
+        # Validar previsões - evitar valores absurdos ou muito pequenos
+        if abs(predicted_tp_pct) > 20:
+            predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
+
+        if predicted_sl_pct > 10:
+            predicted_sl_pct = 10.0
+
+        # Em alta volatilidade, ajustar TP e SL para serem mais conservadores
+        if predicted_sl_pct < 0.5:
+            # Calcular o SL dinâmico baseado em ATR
+            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+            if atr_value:
+                # SL maior em alta volatilidade
+                predicted_sl_pct = (atr_value / current_price) * 100 * 1.8
+                logger.info(f"SL ajustado para alta volatilidade: {predicted_sl_pct:.2f}%")
+
+        # Aumentar TP em alta volatilidade para capturar mais do movimento
+        predicted_tp_pct = predicted_tp_pct * 1.3  # 30% maior
+
+        # Avaliar a qualidade da entrada
+        should_enter, entry_score = self.evaluate_entry_quality(
+            df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct
+        )
+
+        if not should_enter:
+            logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
+            return None
+
+        # Configurar parâmetros para o sinal
+        if signal_direction == "LONG":
+            side: Literal["SELL", "BUY"] = "BUY"
+            position_side: Literal["LONG", "SHORT"] = "LONG"
+            tp_factor = 1 + (predicted_tp_pct / 100)
+            sl_factor = 1 - (predicted_sl_pct / 100)
+        else:  # SHORT
+            side: Literal["SELL", "BUY"] = "SELL"
+            position_side: Literal["LONG", "SHORT"] = "SHORT"
+            tp_factor = 1 - (abs(predicted_tp_pct) / 100)
+            sl_factor = 1 + (predicted_sl_pct / 100)
+
+        # Calcular preços TP/SL
+        tp_price = current_price * tp_factor
+        sl_price = current_price * sl_factor
+
+        # Gerar ID único para o sinal
+        signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+        # Obter ATR para ajustes de quantidade
+        atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+
+        # Determinar tendência e força
+        market_trend = trend
+        market_strength = "HIGH_VOLATILITY"
+
+        signal = TradingSignal(
+            id=signal_id,
+            direction=signal_direction,
+            side=side,
+            position_side=position_side,
+            predicted_tp_pct=predicted_tp_pct,
+            predicted_sl_pct=predicted_sl_pct,
+            tp_price=tp_price,
+            sl_price=sl_price,
+            current_price=current_price,
+            tp_factor=tp_factor,
+            sl_factor=sl_factor,
+            atr_value=atr_value,
+            entry_score=entry_score,
+            rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+            market_trend=market_trend,
+            market_strength=market_strength,
+            timestamp=datetime.now()
+        )
+
+        return signal
 
     def evaluate_entry_quality(
             self,
@@ -440,45 +430,6 @@ class HighVolatilityStrategy(BaseStrategy):
         should_enter = entry_score >= entry_threshold
 
         return should_enter, entry_score
-
-    def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """
-        Prepara uma sequência para previsão com modelo LSTM.
-
-        Args:
-            df: DataFrame com dados históricos
-
-        Returns:
-            np.ndarray: Sequência formatada para o modelo LSTM ou None se houver erro
-        """
-        try:
-            from core.constants import FEATURE_COLUMNS
-            from repositories.data_preprocessor import DataPreprocessor
-
-            # Verificar se temos dados suficientes
-            if len(df) < self.sequence_length:
-                return None
-
-            # Inicializar preprocessador se necessário
-            if self.preprocessor is None:
-                self.preprocessor = DataPreprocessor(
-                    feature_columns=FEATURE_COLUMNS,
-                    outlier_method='iqr',
-                    scaling_method='robust'
-                )
-                self.preprocessor.fit(df)
-
-            # Preparar a sequência
-            x_pred = self.preprocessor.prepare_sequence_for_prediction(
-                df, sequence_length=self.sequence_length
-            )
-
-            return x_pred
-
-        except Exception as e:
-            logger.error(f"Erro ao preparar sequência: {e}", exc_info=True)
-            return None
-
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
@@ -571,11 +522,7 @@ class LowVolatilityStrategy(BaseStrategy):
             required_indicators=["adx", "atr", "atr_pct", "boll_width"]
         )
         super().__init__(config)
-        self.tp_model = tp_model
-        self.sl_model = sl_model
-        self.sequence_length = 24
-        self.preprocessor = None
-        self.preprocessor_fitted = False
+        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
@@ -801,18 +748,18 @@ class LowVolatilityStrategy(BaseStrategy):
         # Prioridade 1: Squeeze seguido de breakout
         if squeeze_detected:
             if long_conditions >= 2:
-                signal_direction = "LONG"
+                signal_direction: Literal["LONG", "SHORT"] = "LONG"
                 logger.info(f"LONG baseado em squeeze com {long_conditions} condições favoráveis")
             elif short_conditions >= 2:
-                signal_direction = "SHORT"
+                signal_direction: Literal["LONG", "SHORT"] = "SHORT"
                 logger.info(f"SHORT baseado em squeeze com {short_conditions} condições favoráveis")
 
         # Prioridade 2: Outras condições
         elif long_conditions >= 2 and long_conditions >= short_conditions:
-            signal_direction = "LONG"
+            signal_direction: Literal["LONG", "SHORT"] = "LONG"
             logger.info(f"LONG baseado em {long_conditions} condições favoráveis em baixa volatilidade")
         elif short_conditions >= 2 and short_conditions > long_conditions:
-            signal_direction = "SHORT"
+            signal_direction: Literal["LONG", "SHORT"] = "SHORT"
             logger.info(f"SHORT baseado em {short_conditions} condições favoráveis em baixa volatilidade")
         else:
             logger.debug(f"Condições insuficientes para sinal: LONG={long_conditions}, SHORT={short_conditions}")
@@ -822,107 +769,99 @@ class LowVolatilityStrategy(BaseStrategy):
         if signal_direction is None:
             return None
 
-        # Gerar previsões usando os modelos LSTM
-        try:
-            X_seq = self._prepare_sequence(df)
-            if X_seq is None:
-                return None
-
-            # Previsões com LSTM
-            predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
-            predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
-
-            # Ajustar direção do TP para SHORT
-            if signal_direction == "SHORT" and predicted_tp_pct > 0:
-                predicted_tp_pct = -predicted_tp_pct
-
-            # Garantir valores positivos para SL
-            predicted_sl_pct = abs(predicted_sl_pct)
-
-            logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-            # Validar previsões - evitar valores absurdos
-            if abs(predicted_tp_pct) > 20:
-                predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
-
-            if predicted_sl_pct > 10:
-                predicted_sl_pct = 10.0
-
-            # Em baixa volatilidade, limitar TP e SL
-            # Obter ATR
-            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-            if atr_value:
-                atr_pct = (atr_value / current_price) * 100
-
-                # TP não deve ser mais do que 3x ATR em baixa volatilidade
-                max_tp_pct = atr_pct * 3.0
-                if abs(predicted_tp_pct) > max_tp_pct:
-                    predicted_tp_pct = max_tp_pct if signal_direction == "LONG" else -max_tp_pct
-                    logger.info(f"TP limitado para 3x ATR: {predicted_tp_pct:.2f}%")
-
-                # SL não deve ser mais do que 1.5x ATR em baixa volatilidade
-                max_sl_pct = atr_pct * 1.5
-                if predicted_sl_pct > max_sl_pct:
-                    predicted_sl_pct = max_sl_pct
-                    logger.info(f"SL limitado para 1.5x ATR: {predicted_sl_pct:.2f}%")
-
-            # Avaliar a qualidade da entrada
-            should_enter, entry_score = self.evaluate_entry_quality(
-                df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct
-            )
-
-            if not should_enter:
-                logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
-                return None
-
-            # Configurar parâmetros para o sinal
-            if signal_direction == "LONG":
-                side = "BUY"
-                position_side = "LONG"
-                tp_factor = 1 + (predicted_tp_pct / 100)
-                sl_factor = 1 - (predicted_sl_pct / 100)
-            else:  # SHORT
-                side = "SELL"
-                position_side = "SHORT"
-                tp_factor = 1 - (abs(predicted_tp_pct) / 100)
-                sl_factor = 1 + (predicted_sl_pct / 100)
-
-            # Calcular preços TP/SL
-            tp_price = current_price * tp_factor
-            sl_price = current_price * sl_factor
-
-            # Gerar ID único para o sinal
-            signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
-
-            # Determinar tendência e força
-            market_trend = "NEUTRAL"  # Em baixa volatilidade geralmente não há tendência forte
-            market_strength = "LOW_VOLATILITY"
-
-            signal = TradingSignal(
-                id=signal_id,
-                direction=signal_direction,
-                side=side,
-                position_side=position_side,
-                predicted_tp_pct=predicted_tp_pct,
-                predicted_sl_pct=predicted_sl_pct,
-                tp_price=tp_price,
-                sl_price=sl_price,
-                current_price=current_price,
-                tp_factor=tp_factor,
-                sl_factor=sl_factor,
-                atr_value=atr_value,
-                entry_score=entry_score,
-                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
-                market_trend=market_trend,
-                market_strength=market_strength,
-                timestamp=datetime.now()
-            )
-
-            return signal
-
-        except Exception as e:
-            logger.error(f"Erro na geração de sinal: {e}", exc_info=True)
+        prediction = self.prediction_service.predict_tp_sl(df, current_price, signal_direction)
+        if prediction is None:
             return None
+
+        predicted_tp_pct, predicted_sl_pct, atr_value = prediction
+
+        # Ajustar direção do TP para SHORT
+        if signal_direction == "SHORT" and predicted_tp_pct > 0:
+            predicted_tp_pct = -predicted_tp_pct
+
+        # Garantir valores positivos para SL
+        predicted_sl_pct = abs(predicted_sl_pct)
+
+        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
+
+        # Validar previsões - evitar valores absurdos
+        if abs(predicted_tp_pct) > 20:
+            predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
+
+        if predicted_sl_pct > 10:
+            predicted_sl_pct = 10.0
+
+        # Em baixa volatilidade, limitar TP e SL
+        # Obter ATR
+        atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+        if atr_value:
+            atr_pct = (atr_value / current_price) * 100
+
+            # TP não deve ser mais do que 3x ATR em baixa volatilidade
+            max_tp_pct = atr_pct * 3.0
+            if abs(predicted_tp_pct) > max_tp_pct:
+                predicted_tp_pct = max_tp_pct if signal_direction == "LONG" else -max_tp_pct
+                logger.info(f"TP limitado para 3x ATR: {predicted_tp_pct:.2f}%")
+
+            # SL não deve ser mais do que 1.5x ATR em baixa volatilidade
+            max_sl_pct = atr_pct * 1.5
+            if predicted_sl_pct > max_sl_pct:
+                predicted_sl_pct = max_sl_pct
+                logger.info(f"SL limitado para 1.5x ATR: {predicted_sl_pct:.2f}%")
+
+        # Avaliar a qualidade da entrada
+        should_enter, entry_score = self.evaluate_entry_quality(
+            df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct
+        )
+
+        if not should_enter:
+            logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
+            return None
+
+        # Configurar parâmetros para o sinal
+        if signal_direction == "LONG":
+            side: Literal["SELL", "BUY"] = "BUY"
+            position_side: Literal["LONG", "SHORT"] = "LONG"
+            tp_factor = 1 + (predicted_tp_pct / 100)
+            sl_factor = 1 - (predicted_sl_pct / 100)
+        else:  # SHORT
+            side: Literal["SELL", "BUY"] = "SELL"
+            position_side: Literal["LONG", "SHORT"] = "SHORT"
+            tp_factor = 1 - (abs(predicted_tp_pct) / 100)
+            sl_factor = 1 + (predicted_sl_pct / 100)
+
+        # Calcular preços TP/SL
+        tp_price = current_price * tp_factor
+        sl_price = current_price * sl_factor
+
+        # Gerar ID único para o sinal
+        signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+        # Determinar tendência e força
+        market_trend = "NEUTRAL"  # Em baixa volatilidade geralmente não há tendência forte
+        market_strength = "LOW_VOLATILITY"
+
+        signal = TradingSignal(
+            id=signal_id,
+            direction=signal_direction,
+            side=side,
+            position_side=position_side,
+            predicted_tp_pct=predicted_tp_pct,
+            predicted_sl_pct=predicted_sl_pct,
+            tp_price=tp_price,
+            sl_price=sl_price,
+            current_price=current_price,
+            tp_factor=tp_factor,
+            sl_factor=sl_factor,
+            atr_value=atr_value,
+            entry_score=entry_score,
+            rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+            market_trend=market_trend,
+            market_strength=market_strength,
+            timestamp=datetime.now()
+        )
+
+        return signal
 
     def evaluate_entry_quality(
             self,
