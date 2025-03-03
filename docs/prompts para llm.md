@@ -36,8 +36,9 @@ minutos) no mercado Bitcoin e outras criptomoedas.
 ## Instruções Específicas
 
 1. **Código Modificado vs. Novo**:
-   - Para código novo ou alterações significativas: forneça o código completo dentro de blocos de código Python.
-   - Para modificações em código existente: apresente apenas o diff das alterações dentro de um bloco de código Python.
+   - Para código novo ou alterações significativas: forneça o código completo.
+   - Para modificações em código existente: apresente apenas o diff das alterações, e um contexto claro de onde deve ser
+     aplicada a alteração.
 
 2. **Tipagem Forte e Moderna**:
    - Utilize exclusivamente tipagem do Python 3.12+ (list[tipo] ao invés de List[tipo], tipo | None ao invés de

@@ -8,37 +8,50 @@ import pandas as pd
 
 from core.logger import logger
 from services.base.schemas import TradingSignal
-from services.prediction.interfaces import ITpSlPredictionService
-from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
 class RangeStrategy(BaseStrategy):
     """
-    Estratégia para mercados em consolidação (range).
-    Foca em capturar movimentos de reversão dos extremos do range.
+    Estratégia avançada para mercados em consolidação (range).
+
+    Foca em capturar movimentos de reversão nos extremos do range com
+    alta probabilidade, utilizando múltiplas confirmações e análise de
+    rejeição nos limites do range.
     """
 
     def __init__(self):
-        """Inicializa a estratégia com configuração otimizada para mercados em range."""
+        """ Inicializa a estratégia com configuração otimizada para mercados em range. """
         config = StrategyConfig(
             name="Range Strategy",
             description="Estratégia otimizada para mercados laterais (em range)",
             min_rr_ratio=1.3,  # R:R menor em mercado de range
-            entry_threshold=0.7,  # Mais rigoroso na entrada em range
+            entry_threshold=0.65,  # Mais rigoroso na entrada em range
             tp_adjustment=0.8,  # TP menor pois os movimentos são limitados
             sl_adjustment=0.9,  # SL ligeiramente mais apertado
             entry_aggressiveness=0.8,  # Menos agressivo nas entradas
             max_sl_percent=1.2,
             min_tp_percent=0.4,
-            required_indicators=["adx", "boll_width", "rsi", "boll_lband", "boll_hband"]
+            required_indicators=[
+                "adx", "boll_width", "rsi", "boll_lband", "boll_hband",
+                "boll_pct_b", "stoch_k", "stoch_d", "atr", "ema_short",
+                "ema_long", "volume", "macd", "macd_histogram"
+            ]
         )
         super().__init__(config)
-        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
+
+        # Armazenar informações do range atual
+        self.range_high = None
+        self.range_low = None
+        self.range_width_pct = None
+        self.range_midpoint = None
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
         Determina se a estratégia deve ser ativada com base nas condições de mercado.
+
+        Implementa verificações mais robustas para detectar mercados em range,
+        analisando ADX, Bollinger Bands, volatilidade e comportamento de preço.
         """
         # Verificar se temos todos os indicadores necessários
         if not self.verify_indicators(df):
@@ -49,6 +62,12 @@ class RangeStrategy(BaseStrategy):
         adx_value = df['adx'].iloc[-1]
         adx_low = adx_value < 20  # ADX baixo indica ausência de tendência
 
+        # Verificar variação do ADX nos últimos períodos
+        adx_stable = False
+        if len(df) > 10:
+            adx_std = df['adx'].iloc[-10:].std()
+            adx_stable = adx_std < 2.0  # ADX com pouca variação indica estabilidade
+
         # Verificar EMAs próximas (indicando ausência de tendência)
         emas_flat = False
         if 'ema_short' in df.columns and 'ema_long' in df.columns:
@@ -57,200 +76,722 @@ class RangeStrategy(BaseStrategy):
             ema_diff_pct = abs(ema_short - ema_long) / ema_long * 100
             emas_flat = ema_diff_pct < 0.3  # EMAs muito próximas
 
+            # Verificar inclinação das EMAs
+            if len(df) > 5:
+                ema_slope = 0
+                for i in range(1, 5):
+                    if df['ema_short'].iloc[-i] > df['ema_short'].iloc[-i - 1]:
+                        ema_slope += 1
+                    elif df['ema_short'].iloc[-i] < df['ema_short'].iloc[-i - 1]:
+                        ema_slope -= 1
+
+                # Se o ema_slope está próximo de zero, a EMA não tem direção clara
+                emas_flat = emas_flat and abs(ema_slope) <= 2
+
         # Verificar tendência multi-timeframe
         mtf_neutral = False
         if mtf_data and 'consolidated_trend' in mtf_data:
             mtf_neutral = 'NEUTRAL' in mtf_data['consolidated_trend']
 
+        # Verificar se o preço está contido em um canal horizontal
+        price_channel = False
+        if len(df) > 20:
+            # Calcular range dos últimos 20 períodos
+            high_range = df['high'].iloc[-20:].max() - df['high'].iloc[-20:].min()
+            low_range = df['low'].iloc[-20:].max() - df['low'].iloc[-20:].min()
+            close_range = df['close'].iloc[-20:].max() - df['close'].iloc[-20:].min()
+
+            # Se o range é menor que X% do preço atual, consideramos um canal
+            avg_price = df['close'].iloc[-1]
+            range_pct = (close_range / avg_price) * 100
+            price_channel = range_pct < 2.0  # Range menor que 2% indica consolidação
+
+            # Armazenar as informações do range para uso posterior
+            if price_channel:
+                self.range_high = df['high'].iloc[-20:].max()
+                self.range_low = df['low'].iloc[-20:].min()
+                self.range_width_pct = range_pct
+                self.range_midpoint = (self.range_high + self.range_low) / 2
+
+                logger.info(
+                    f"Range identificado: High={self.range_high:.2f}, Low={self.range_low:.2f}, "
+                    f"Width={range_pct:.2f}%, Midpoint={self.range_midpoint:.2f}"
+                )
+
         # Verificar largura do Bollinger Band (estreita em consolidação)
         bb_narrow = False
-        bb_width = df['boll_width'].iloc[-1]
-        bb_narrow = bb_width < 0.03  # Bandas estreitas
+        if 'boll_width' in df.columns:
+            bb_width = df['boll_width'].iloc[-1]
+            avg_width = df['boll_width'].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0.02
+            bb_narrow = bb_width < (avg_width * 0.8)  # Bandas mais estreitas que a média
+
+            # Verificar se a largura da banda está estabilizando ou diminuindo
+            if len(df) > 5:
+                recent_widths = df['boll_width'].iloc[-5:].values
+                width_trend = 0
+                for i in range(1, len(recent_widths)):
+                    if recent_widths[i] < recent_widths[i - 1]:
+                        width_trend -= 1
+                    else:
+                        width_trend += 1
+
+                # Se width_trend é negativo, as bandas estão se estreitando
+                bb_narrow = bb_narrow or width_trend < 0
 
         # Verificar volatilidade baixa usando ATR
         low_volatility = False
         if 'atr_pct' in df.columns:
             atr_pct = df['atr_pct'].iloc[-1]
-            low_volatility = atr_pct < 0.5
+            low_volatility = atr_pct < 0.6
         elif 'atr' in df.columns and 'close' in df.columns:
             atr = df['atr'].iloc[-1]
             close = df['close'].iloc[-1]
             atr_pct = (atr / close) * 100
-            low_volatility = atr_pct < 0.5
+            low_volatility = atr_pct < 0.6
 
-        # Ativar se pelo menos dois indicadores confirmarem
-        confirmations = sum([adx_low, emas_flat, mtf_neutral, bb_narrow, low_volatility])
-        should_activate = confirmations >= 2
+        # Verificar volume reduzido (comum em consolidações)
+        low_volume = False
+        if 'volume' in df.columns and len(df) > 14:
+            current_volume = df['volume'].iloc[-5:].mean()
+            past_volume = df['volume'].iloc[-14:-5].mean()
+            low_volume = current_volume < past_volume * 0.9  # Volume atual < 90% do volume passado
+
+        # Ativar se pelo menos três indicadores confirmarem (aumento do rigor)
+        confirmations = sum(
+            [
+                adx_low, adx_stable, emas_flat, mtf_neutral,
+                price_channel, bb_narrow, low_volatility, low_volume
+            ]
+        )
+        should_activate = confirmations >= 3
 
         if should_activate:
             logger.info(
                 f"Estratégia de RANGE ativada: ADX_baixo={adx_low} ({adx_value:.1f}), "
-                f"EMAs_flat={emas_flat}, MTF_neutral={mtf_neutral}, "
-                f"BB_estreito={bb_narrow} ({bb_width:.4f}), Volatilidade_baixa={low_volatility}"
+                f"ADX_estável={adx_stable}, EMAs_flat={emas_flat}, MTF_neutral={mtf_neutral}, "
+                f"Canal de Preço={price_channel} ({range_pct:.2f}% width), "
+                f"BB_estreito={bb_narrow} ({bb_width:.4f}), Volatilidade_baixa={low_volatility}, "
+                f"Volume_reduzido={low_volume}"
             )
 
         return should_activate
+
+    def _identify_range_extremes(self, df: pd.DataFrame) -> tuple[float, float]:
+        """
+        Identifica os limites superior e inferior do range atual.
+
+        Utiliza múltiplos métodos para determinar os limites com maior precisão,
+        incluindo máximos/mínimos recentes, Bollinger Bands e níveis de volume.
+
+        Returns:
+            tuple: (limite_superior, limite_inferior) do range
+        """
+        # Usar os extremos pré-calculados se disponíveis
+        if self.range_high is not None and self.range_low is not None:
+            return self.range_high, self.range_low
+
+        # Método 1: Usar máximos e mínimos recentes
+        if len(df) >= 20:
+            high_max = df['high'].iloc[-20:].max()
+            low_min = df['low'].iloc[-20:].min()
+        else:
+            high_max = df['high'].max()
+            low_min = df['low'].min()
+
+        # Método 2: Usar Bollinger Bands se disponíveis
+        bb_high, bb_low = None, None
+        if 'boll_hband' in df.columns and 'boll_lband' in df.columns:
+            bb_high = df['boll_hband'].iloc[-1]
+            bb_low = df['boll_lband'].iloc[-1]
+
+            # Ajustar com base na força do range
+            if 'boll_width' in df.columns:
+                width = df['boll_width'].iloc[-1]
+                # Se as bandas estão muito estreitas, expandir um pouco
+                if width < 0.015:
+                    bb_high = bb_high * 1.001
+                    bb_low = bb_low * 0.999
+
+        # Método 3: Usar níveis de pivot se disponíveis
+        pivot_high, pivot_low = None, None
+        if 'pivot_r1' in df.columns and 'pivot_s1' in df.columns:
+            pivot_high = df['pivot_r1'].iloc[-1]
+            pivot_low = df['pivot_s1'].iloc[-1]
+
+        # Combinar os diferentes métodos para obter limites mais precisos
+        upper_levels = [level for level in [high_max, bb_high, pivot_high] if level is not None]
+        lower_levels = [level for level in [low_min, bb_low, pivot_low] if level is not None]
+
+        upper_bound = sum(upper_levels) / len(upper_levels) if upper_levels else high_max
+        lower_bound = sum(lower_levels) / len(lower_levels) if lower_levels else low_min
+
+        # Armazenar para uso posterior
+        self.range_high = upper_bound
+        self.range_low = lower_bound
+        self.range_width_pct = ((upper_bound - lower_bound) / lower_bound) * 100
+        self.range_midpoint = (upper_bound + lower_bound) / 2
+
+        logger.info(
+            f"Range calculado: High={upper_bound:.2f}, Low={lower_bound:.2f}, "
+            f"Width={self.range_width_pct:.2f}%, Midpoint={self.range_midpoint:.2f}"
+        )
+
+        return upper_bound, lower_bound
+
+    def _check_upper_extreme_rejection(self, df: pd.DataFrame, upper_bound: float) -> tuple[bool, float]:
+        """
+        Verifica se há uma rejeição no extremo superior do range (resistência).
+
+        Returns:
+            tuple: (rejeição_detectada, força_da_rejeição de 0 a 1)
+        """
+        rejection_detected = False
+        rejection_strength = 0.0
+
+        # Precisamos do candle atual e anterior
+        if len(df) < 2:
+            return False, 0.0
+
+        # 1. Verificar proximidade ao limite superior
+        current_price = df['close'].iloc[-1]
+        previous_high = df['high'].iloc[-2]
+        current_high = df['high'].iloc[-1]
+
+        # Distância do preço atual ao limite superior (em percentual)
+        distance_to_upper = (upper_bound - current_price) / current_price * 100
+
+        # Verificar se tocamos ou nos aproximamos muito do limite superior
+        near_upper = distance_to_upper < 0.3 or previous_high >= upper_bound * 0.998
+
+        if not near_upper:
+            return False, 0.0
+
+        # 2. Verificar padrão de rejeição
+
+        # a) Verifica se temos uma vela de alta seguida de uma vela de baixa
+        bullish_candle = df['close'].iloc[-2] > df['open'].iloc[-2]
+        bearish_candle = df['close'].iloc[-1] < df['open'].iloc[-1]
+
+        pattern1 = bullish_candle and bearish_candle
+
+        # b) Ou se temos uma vela com sombra superior longa
+        upper_wick = current_high - max(df['open'].iloc[-1], df['close'].iloc[-1])
+        body_size = abs(df['open'].iloc[-1] - df['close'].iloc[-1])
+
+        long_upper_wick = upper_wick > body_size * 1.5
+
+        pattern2 = long_upper_wick and bearish_candle
+
+        # c) Ou se o preço subiu e depois voltou (failed breakout)
+        touched_upper = current_high >= upper_bound * 0.998
+        closed_below = current_price < upper_bound * 0.995
+
+        pattern3 = touched_upper and closed_below
+
+        # 3. Verificar volume (alto volume na rejeição é mais significativo)
+        volume_signal = 0.0
+        if 'volume' in df.columns:
+            current_volume = df['volume'].iloc[-1]
+            avg_volume = df['volume'].iloc[-10:].mean()
+
+            if current_volume > avg_volume * 1.2:  # Volume 20% acima da média
+                volume_signal = min((current_volume / avg_volume - 1), 1.0)
+
+        # Combinar todos os sinais para calcular a força da rejeição
+        if pattern1 or pattern2 or pattern3:
+            rejection_detected = True
+
+            # Base strength
+            rejection_strength = 0.6
+
+            # Add to strength based on specific patterns
+            if pattern1:
+                rejection_strength += 0.1
+                logger.info(f"Padrão de rejeição superior 1 detectado: vela alta seguida de vela baixa")
+            if pattern2:
+                rejection_strength += 0.2
+                logger.info(f"Padrão de rejeição superior 2 detectado: vela com sombra superior longa")
+            if pattern3:
+                rejection_strength += 0.3
+                logger.info(f"Padrão de rejeição superior 3 detectado: falha de breakout acima do range")
+
+            # Add volume component
+            rejection_strength += volume_signal * 0.2
+
+            # Normalize to 0-1
+            rejection_strength = min(rejection_strength, 1.0)
+
+            logger.info(
+                f"Rejeição superior detectada próximo a {upper_bound:.2f} com força {rejection_strength:.2f}. "
+                f"Distância: {distance_to_upper:.2f}%, Volume: {volume_signal:.2f}"
+            )
+
+        return rejection_detected, rejection_strength
+
+    def _check_lower_extreme_rejection(self, df: pd.DataFrame, lower_bound: float) -> tuple[bool, float]:
+        """
+        Verifica se há uma rejeição no extremo inferior do range (suporte).
+
+        Returns:
+            tuple: (rejeição_detectada, força_da_rejeição de 0 a 1)
+        """
+        rejection_detected = False
+        rejection_strength = 0.0
+
+        # Precisamos do candle atual e anterior
+        if len(df) < 2:
+            return False, 0.0
+
+        # 1. Verificar proximidade ao limite inferior
+        current_price = df['close'].iloc[-1]
+        previous_low = df['low'].iloc[-2]
+        current_low = df['low'].iloc[-1]
+
+        # Distância do preço atual ao limite inferior (em percentual)
+        distance_to_lower = (current_price - lower_bound) / current_price * 100
+
+        # Verificar se tocamos ou nos aproximamos muito do limite inferior
+        near_lower = distance_to_lower < 0.3 or previous_low <= lower_bound * 1.002
+
+        if not near_lower:
+            return False, 0.0
+
+        # 2. Verificar padrão de rejeição
+
+        # a) Verifica se temos uma vela de baixa seguida de uma vela de alta
+        bearish_candle = df['close'].iloc[-2] < df['open'].iloc[-2]
+        bullish_candle = df['close'].iloc[-1] > df['open'].iloc[-1]
+
+        pattern1 = bearish_candle and bullish_candle
+
+        # b) Ou se temos uma vela com sombra inferior longa
+        lower_wick = min(df['open'].iloc[-1], df['close'].iloc[-1]) - current_low
+        body_size = abs(df['open'].iloc[-1] - df['close'].iloc[-1])
+
+        long_lower_wick = lower_wick > body_size * 1.5
+
+        pattern2 = long_lower_wick and bullish_candle
+
+        # c) Ou se o preço desceu e depois subiu (failed breakdown)
+        touched_lower = current_low <= lower_bound * 1.002
+        closed_above = current_price > lower_bound * 1.005
+
+        pattern3 = touched_lower and closed_above
+
+        # 3. Verificar volume (alto volume na rejeição é mais significativo)
+        volume_signal = 0.0
+        if 'volume' in df.columns:
+            current_volume = df['volume'].iloc[-1]
+            avg_volume = df['volume'].iloc[-10:].mean()
+
+            if current_volume > avg_volume * 1.2:  # Volume 20% acima da média
+                volume_signal = min((current_volume / avg_volume - 1), 1.0)
+
+        # Combinar todos os sinais para calcular a força da rejeição
+        if pattern1 or pattern2 or pattern3:
+            rejection_detected = True
+
+            # Base strength
+            rejection_strength = 0.6
+
+            # Add to strength based on specific patterns
+            if pattern1:
+                rejection_strength += 0.1
+                logger.info(f"Padrão de rejeição inferior 1 detectado: vela baixa seguida de vela alta")
+            if pattern2:
+                rejection_strength += 0.2
+                logger.info(f"Padrão de rejeição inferior 2 detectado: vela com sombra inferior longa")
+            if pattern3:
+                rejection_strength += 0.3
+                logger.info(f"Padrão de rejeição inferior 3 detectado: falha de breakdown abaixo do range")
+
+            # Add volume component
+            rejection_strength += volume_signal * 0.2
+
+            # Normalize to 0-1
+            rejection_strength = min(rejection_strength, 1.0)
+
+            logger.info(
+                f"Rejeição inferior detectada próximo a {lower_bound:.2f} com força {rejection_strength:.2f}. "
+                f"Distância: {distance_to_lower:.2f}%, Volume: {volume_signal:.2f}"
+            )
+
+        return rejection_detected, rejection_strength
+
+    def _check_overbought_oversold(self, df: pd.DataFrame) -> tuple[bool, bool, float]:
+        """
+        Verifica se o mercado está em condição de sobrecompra ou sobrevenda
+        usando múltiplos osciladores.
+
+        Returns:
+            tuple: (em_sobrecompra, em_sobrevenda, força_do_sinal)
+        """
+        overbought = False
+        oversold = False
+        signal_strength = 0.0
+        signals = []
+
+        # 1. Verificar RSI
+        if 'rsi' in df.columns:
+            rsi = df['rsi'].iloc[-1]
+            rsi_prev = df['rsi'].iloc[-2] if len(df) > 2 else 50
+
+            # Sobrecompra e sobrevenda no RSI + direção de mudança
+            if rsi > 70:
+                overbought_strength = min((rsi - 70) / 30, 1.0)
+                # Maior força se o RSI está começando a cair (possível reversão)
+                if rsi < rsi_prev:
+                    overbought_strength *= 1.2
+
+                signals.append(('overbought', overbought_strength))
+                logger.info(f"RSI em sobrecompra: {rsi:.1f} (força: {overbought_strength:.2f})")
+
+            elif rsi < 30:
+                oversold_strength = min((30 - rsi) / 30, 1.0)
+                # Maior força se o RSI está começando a subir (possível reversão)
+                if rsi > rsi_prev:
+                    oversold_strength *= 1.2
+
+                signals.append(('oversold', oversold_strength))
+                logger.info(f"RSI em sobrevenda: {rsi:.1f} (força: {oversold_strength:.2f})")
+
+        # 2. Verificar Stochastic
+        if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
+            stoch_k = df['stoch_k'].iloc[-1]
+            stoch_d = df['stoch_d'].iloc[-1]
+            stoch_k_prev = df['stoch_k'].iloc[-2] if len(df) > 2 else 50
+
+            # Sobrecompra e sobrevenda no Stochastic + direção de mudança
+            if stoch_k > 80 and stoch_d > 80:
+                overbought_strength = min((stoch_k - 80) / 20, 1.0) * 0.8  # Peso menor que RSI
+                # Maior força se o Stoch está começando a cair (possível reversão)
+                if stoch_k < stoch_k_prev:
+                    overbought_strength *= 1.2
+
+                signals.append(('overbought', overbought_strength))
+                logger.info(
+                    f"Stochastic em sobrecompra: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {overbought_strength:.2f})"
+                )
+
+            elif stoch_k < 20 and stoch_d < 20:
+                oversold_strength = min((20 - stoch_k) / 20, 1.0) * 0.8  # Peso menor que RSI
+                # Maior força se o Stoch está começando a subir (possível reversão)
+                if stoch_k > stoch_k_prev:
+                    oversold_strength *= 1.2
+
+                signals.append(('oversold', oversold_strength))
+                logger.info(
+                    f"Stochastic em sobrevenda: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {oversold_strength:.2f})"
+                )
+
+        # 3. Verificar Bollinger %B
+        if 'boll_pct_b' in df.columns:
+            pct_b = df['boll_pct_b'].iloc[-1]
+            pct_b_prev = df['boll_pct_b'].iloc[-2] if len(df) > 2 else 0.5
+
+            # %B próximo de 1 = sobrecompra, %B próximo de 0 = sobrevenda
+            if pct_b > 0.95:
+                overbought_strength = min((pct_b - 0.95) * 20, 1.0) * 0.7  # Peso menor ainda
+                # Maior força se %B está começando a cair (possível reversão)
+                if pct_b < pct_b_prev:
+                    overbought_strength *= 1.2
+
+                signals.append(('overbought', overbought_strength))
+                logger.info(f"Bollinger %B em sobrecompra: {pct_b:.2f} (força: {overbought_strength:.2f})")
+
+            elif pct_b < 0.05:
+                oversold_strength = min((0.05 - pct_b) * 20, 1.0) * 0.7  # Peso menor ainda
+                # Maior força se %B está começando a subir (possível reversão)
+                if pct_b > pct_b_prev:
+                    oversold_strength *= 1.2
+
+                signals.append(('oversold', oversold_strength))
+                logger.info(f"Bollinger %B em sobrevenda: {pct_b:.2f} (força: {oversold_strength:.2f})")
+
+        # 4. Verificar MACD histograma para confirmar momentum
+        if 'macd_histogram' in df.columns and len(df) > 2:
+            hist = df['macd_histogram'].iloc[-1]
+            hist_prev = df['macd_histogram'].iloc[-2]
+
+            # Se o histograma está diminuindo numa região positiva = perda de momentum de alta
+            if hist > 0 and hist < hist_prev:
+                overbought_boost = 0.1
+                signals.append(('overbought', overbought_boost))
+                logger.info(f"MACD histograma diminuindo em região positiva: {hist:.6f} < {hist_prev:.6f}")
+
+            # Se o histograma está aumentando numa região negativa = perda de momentum de baixa
+            elif hist < 0 and hist > hist_prev:
+                oversold_boost = 0.1
+                signals.append(('oversold', oversold_boost))
+                logger.info(f"MACD histograma aumentando em região negativa: {hist:.6f} > {hist_prev:.6f}")
+
+        # Processar os sinais acumulados
+        if signals:
+            # Separe os sinais de sobrecompra e sobrevenda
+            overbought_signals = [strength for signal_type, strength in signals if signal_type == 'overbought']
+            oversold_signals = [strength for signal_type, strength in signals if signal_type == 'oversold']
+
+            # Determinar se estamos em sobrecompra ou sobrevenda com base no tipo dominante
+            if overbought_signals and len(overbought_signals) > len(oversold_signals):
+                overbought = True
+                # Use o sinal mais forte como base e adicione pequenos bônus para sinais adicionais
+                signal_strength = max(overbought_signals) + 0.05 * (len(overbought_signals) - 1)
+                signal_strength = min(signal_strength, 1.0)
+
+            elif oversold_signals and len(oversold_signals) > len(overbought_signals):
+                oversold = True
+                # Use o sinal mais forte como base e adicione pequenos bônus para sinais adicionais
+                signal_strength = max(oversold_signals) + 0.05 * (len(oversold_signals) - 1)
+                signal_strength = min(signal_strength, 1.0)
+
+        return overbought, oversold, signal_strength
+
+    def _check_range_compression(self, df: pd.DataFrame) -> tuple[bool, float]:
+        """
+        Verifica se o mercado está em compressão de volatilidade (squeeze),
+        o que pode indicar um movimento explosivo iminente.
+
+        Returns:
+            tuple: (em_compressão, força_da_compressão de 0 a 1)
+        """
+        compression_detected = False
+        compression_strength = 0.0
+
+        if len(df) < 20:  # Precisamos de histórico para detectar compressão
+            return False, 0.0
+
+        # 1. Verificar compressão das Bollinger Bands
+        if 'boll_width' in df.columns:
+            current_width = df['boll_width'].iloc[-1]
+            avg_width = df['boll_width'].iloc[-20:].mean()
+
+            # Bandas mais estreitas que X% da média = compressão
+            width_ratio = current_width / avg_width
+
+            if width_ratio < 0.8:
+                # Quanto menor o width_ratio, maior a compressão
+                bb_compression = min((0.8 - width_ratio) * 5, 1.0)
+                logger.info(f"Compressão nas Bollinger Bands: {width_ratio:.2f} vs média (força: {bb_compression:.2f})")
+
+                # Verificar também se as bandas estão se estreitando ou já expandindo
+                width_direction = 0
+                for i in range(1, min(5, len(df))):
+                    if df['boll_width'].iloc[-i] < df['boll_width'].iloc[-i - 1]:
+                        width_direction -= 1  # Estreitando
+                    else:
+                        width_direction += 1  # Expandindo
+
+                # Se as bandas começaram a expandir após compressão, isso é um sinal de movimento iminente
+                if width_direction > 0:
+                    bb_compression *= 1.2
+                    logger.info(f"Bollinger Bands começando a expandir após compressão")
+
+                compression_detected = True
+                compression_strength = bb_compression
+
+        # 2. Verificar redução do ATR (outra medida de compressão de volatilidade)
+        if 'atr' in df.columns:
+            current_atr = df['atr'].iloc[-1]
+            avg_atr = df['atr'].iloc[-20:].mean()
+
+            # ATR atual menor que X% da média = compressão
+            atr_ratio = current_atr / avg_atr
+
+            if atr_ratio < 0.8:
+                # Quanto menor o atr_ratio, maior a compressão
+                atr_compression = min((0.8 - atr_ratio) * 5, 1.0)
+                logger.info(f"Compressão no ATR: {atr_ratio:.2f} vs média (força: {atr_compression:.2f})")
+
+                if not compression_detected:
+                    compression_detected = True
+                    compression_strength = atr_compression
+                else:
+                    # Se já detectamos compressão nas BBands, combinar os sinais
+                    compression_strength = 0.7 * compression_strength + 0.3 * atr_compression
+
+        # 3. Verificar volume reduzido (comum antes de um movimento explosivo)
+        if 'volume' in df.columns:
+            current_volume = df['volume'].iloc[-3:].mean()  # Média dos últimos 3 períodos
+            avg_volume = df['volume'].iloc[-20:].mean()
+
+            # Volume atual menor que X% da média = possível compressão
+            volume_ratio = current_volume / avg_volume
+
+            if volume_ratio < 0.7:
+                # Quanto menor o volume_ratio, maior a possibilidade de movimento iminente
+                vol_compression = min((0.7 - volume_ratio) * 3, 1.0)
+                logger.info(f"Volume reduzido: {volume_ratio:.2f} vs média (força: {vol_compression:.2f})")
+
+                if not compression_detected:
+                    compression_detected = True
+                    compression_strength = vol_compression * 0.7  # Menor peso para volume sozinho
+                else:
+                    # Se já detectamos compressão, adicionar componente de volume
+                    compression_strength = compression_strength * 0.8 + vol_compression * 0.2
+
+        return compression_detected, min(compression_strength, 1.0)
 
     async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
         Gera um sinal de trading para mercados em range.
         Busca oportunidades de compra no suporte e venda na resistência.
-        """
-        # Em mercados laterais, queremos comprar no suporte e vender na resistência
 
+        Implementa análise avançada de condições de entrada nos extremos do range,
+        combinando múltiplas confirmações para maior probabilidade de sucesso.
+        """
         # Verificar se temos todos os indicadores necessários
         if not self.verify_indicators(df):
             return None
 
-        # Verificar se estamos próximos do suporte ou resistência nas Bollinger Bands
-        lower_band = df['boll_lband'].iloc[-1]
-        upper_band = df['boll_hband'].iloc[-1]
+        # 1. Identificar os limites do range
+        upper_bound, lower_bound = self._identify_range_extremes(df)
+        range_width = upper_bound - lower_bound
 
-        # Calcular proximidade com as bandas
-        dist_to_lower = (current_price - lower_band) / current_price * 100
-        dist_to_upper = (upper_band - current_price) / current_price * 100
-
-        near_support = dist_to_lower < 0.3  # Preço próximo da banda inferior
-        near_resistance = dist_to_upper < 0.3  # Preço próximo da banda superior
-
-        if near_support:
-            logger.info(f"Preço próximo do suporte (Bollinger Lower): {dist_to_lower:.2f}%")
-        else:
-            logger.info(f"Preço não está próximo do suporte: {dist_to_lower:.2f}%")
-
-        if near_resistance:
-            logger.info(f"Preço próximo da resistência (Bollinger Upper): {dist_to_upper:.2f}%")
-        else:
-            logger.info(f"Preço não está próximo da resistência: {dist_to_upper:.2f}%")
-
-        # Verificar condições adicionais usando RSI
-        rsi = df['rsi'].iloc[-1]
-        oversold = rsi < 30  # RSI em condição de sobrevenda
-        overbought = rsi > 70  # RSI em condição de sobrecompra
-
-        if oversold:
-            logger.info(f"RSI em sobrevenda: {rsi:.1f}")
-        else:
-            logger.info(f"RSI não está em sobrevenda: {rsi:.1f}")
-
-        if overbought:
-            logger.info(f"RSI em sobrecompra: {rsi:.1f}")
-        else:
-            logger.info(f"RSI não está em sobrecompra: {rsi:.1f}")
-
-        # Verificar padrões de reversão em velas japonesas
-        reversal_pattern = False
-        if len(df) >= 3 and 'open' in df.columns and 'close' in df.columns:
-            # Verificar padrão de reversão simples (vela longa + vela de reversão)
-            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
-            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
-            c2, o2 = df['close'].iloc[-3], df['open'].iloc[-3]
-
-            # Exemplo: após duas velas de baixa, vela de alta forte
-            if c2 < o2 and c1 < o1 and c0 > o0 and c0 > c1 * 1.005:
-                reversal_pattern = True
-                logger.info("Padrão de reversão de baixa para alta detectado")
-
-            # Exemplo: após duas velas de alta, vela de baixa forte
-            elif c2 > o2 and c1 > o1 and c0 < o0 and c0 < c1 * 0.995:
-                reversal_pattern = True
-                logger.info("Padrão de reversão de alta para baixa detectado")
-            else:
-                logger.info(
-                    f"Sem padrão de reversão: c0={c0:.2f}, o0={o0:.2f}, "
-                    f"c1={c1:.2f}, o1={o1:.2f}, c2={c2:.2f}, o2={o2:.2f}"
+        # Se o range for muito estreito, não vale a pena operar
+        if (range_width / current_price) * 100 < 0.8:
+            logger.info(
+                f"Range muito estreito ({(range_width / current_price) * 100:.2f}%), não compensatório para trade"
                 )
+            return None
 
-        # Verificar compressão de volatilidade (squeeze)
-        volatility_compression = False
-        if 'boll_width' in df.columns:
-            boll_width = df['boll_width'].iloc[-1]
-            avg_width = df['boll_width'].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0.02
-            volatility_compression = boll_width < (avg_width * 0.8)
+        # 2. Verificar rejeição no extremo superior (para SHORT)
+        upper_rejection, upper_strength = self._check_upper_extreme_rejection(df, upper_bound)
 
-            if volatility_compression:
-                logger.info(f"Compressão de volatilidade detectada: {boll_width:.4f} vs {avg_width:.4f}")
-            else:
-                logger.info(f"Sem compressão de volatilidade: {boll_width:.4f} vs {avg_width:.4f}")
+        # 3. Verificar rejeição no extremo inferior (para LONG)
+        lower_rejection, lower_strength = self._check_lower_extreme_rejection(df, lower_bound)
 
-        # Verificar alinhamento multi-timeframe (neutro é favorável em range)
-        mtf_neutral = False
-        if mtf_data and 'consolidated_trend' in mtf_data:
-            mtf_trend = mtf_data['consolidated_trend']
-            mtf_neutral = 'NEUTRAL' in mtf_trend
-            if mtf_neutral:
-                logger.info(f"Tendência MTF neutra favorável para range: {mtf_trend}")
-            else:
-                logger.info(f"Tendência MTF não é neutra: {mtf_trend}")
+        # 4. Verificar condições de sobrecompra/sobrevenda
+        overbought, oversold, oscillator_strength = self._check_overbought_oversold(df)
 
-        # Determinar direção do sinal
+        # 5. Verificar compressão de volatilidade (squeeze)
+        compression, compression_strength = self._check_range_compression(df)
+
+        # 6. Decidir direção do sinal com base nas análises anteriores
         signal_direction = None
+        entry_score = 0.0
 
-        conditions_long = 0
-        conditions_short = 0
+        # Condições para SHORT (vender na resistência)
+        short_conditions = [
+            upper_rejection,
+            overbought,
+            compression and df['close'].iloc[-1] > self.range_midpoint,  # Compressão na parte superior do range
+            current_price > (upper_bound - (range_width * 0.10))  # Preço próximo ao topo do range
+        ]
 
-        # Condições para LONG
-        if near_support or oversold:
-            conditions_long += 1
-        if reversal_pattern and c0 > o0:  # Vela de alta
-            conditions_long += 1
-        if volatility_compression and df['close'].iloc[-1] > df['open'].iloc[-1]:
-            conditions_long += 1
-        if mtf_neutral:
-            conditions_long += 0.5  # Condição parcial
+        short_scores = [
+            upper_strength * 0.7 if upper_rejection else 0,
+            oscillator_strength * 0.6 if overbought else 0,
+            compression_strength * 0.5 if compression and df['close'].iloc[-1] > self.range_midpoint else 0,
+            min(
+                ((current_price - (upper_bound - range_width * 0.10)) / (range_width * 0.10)), 1.0
+            ) * 0.4 if current_price > (upper_bound - (range_width * 0.10)) else 0
+        ]
 
-        # Condições para SHORT
-        if near_resistance or overbought:
-            conditions_short += 1
-        if reversal_pattern and c0 < o0:  # Vela de baixa
-            conditions_short += 1
-        if volatility_compression and df['close'].iloc[-1] < df['open'].iloc[-1]:
-            conditions_short += 1
-        if mtf_neutral:
-            conditions_short += 0.5  # Condição parcial
+        # Condições para LONG (comprar no suporte)
+        long_conditions = [
+            lower_rejection,
+            oversold,
+            compression and df['close'].iloc[-1] < self.range_midpoint,  # Compressão na parte inferior do range
+            current_price < (lower_bound + (range_width * 0.10))  # Preço próximo ao fundo do range
+        ]
 
+        long_scores = [
+            lower_strength * 0.7 if lower_rejection else 0,
+            oscillator_strength * 0.6 if oversold else 0,
+            compression_strength * 0.5 if compression and df['close'].iloc[-1] < self.range_midpoint else 0,
+            min(
+                ((lower_bound + range_width * 0.10) - current_price) / (range_width * 0.10), 1.0
+            ) * 0.4 if current_price < (lower_bound + (range_width * 0.10)) else 0
+        ]
+
+        # Calcular score para cada direção - quanto mais condições atendidas e mais fortes, melhor
+        short_score = sum(short_scores) / max(1, (sum(1 for c in short_conditions if c) * 0.7))
+        long_score = sum(long_scores) / max(1, (sum(1 for c in long_conditions if c) * 0.7))
+
+        # Logar as condições para análise
         logger.info(
-            f"Condições RANGE - LONG: {conditions_long}/2, SHORT: {conditions_short}/2 - "
-            f"Suporte={near_support}, Resistência={near_resistance}, "
-            f"Oversold={oversold}, Overbought={overbought}, "
-            f"Reversão={reversal_pattern}, Compressão={volatility_compression}, "
-            f"MTF_Neutro={mtf_neutral}"
+            f"Score SHORT: {short_score:.2f} (condições: {sum(1 for c in short_conditions if c)}/4) - "
+            f"Rejeição superior={upper_rejection} ({upper_strength:.2f}), "
+            f"Sobrecompra={overbought} ({oscillator_strength:.2f}), "
+            f"Compressão superior={compression and df['close'].iloc[-1] > self.range_midpoint} ({compression_strength:.2f}), "
+            f"Próximo ao topo={current_price > (upper_bound - (range_width * 0.10))}"
         )
 
-        # Selecionar a direção com mais condições favoráveis
-        if conditions_long >= 2 and conditions_long > conditions_short:
-            signal_direction: Literal["LONG", "SHORT"] = "LONG"
-            logger.info(
-                f"Condições para LONG em range: Suporte={near_support}, "
-                f"Oversold={oversold}, Reversão={reversal_pattern}, "
-                f"Compressão={volatility_compression}, MTF_Neutro={mtf_neutral}"
-            )
-        elif conditions_short >= 2 and conditions_short > conditions_long:
-            signal_direction: Literal["LONG", "SHORT"] = "SHORT"
-            logger.info(
-                f"Condições para SHORT em range: Resistência={near_resistance}, "
-                f"Overbought={overbought}, Reversão={reversal_pattern}, "
-                f"Compressão={volatility_compression}, MTF_Neutro={mtf_neutral}"
-            )
+        # Percentual mínimo de condições e score mínimo
+        min_conditions_pct = 0.5  # Pelo menos 50% das condições
+        min_score = 0.5
+
+        # Verificar qual direção tem melhores condições e score
+        short_conditions_met = sum(1 for c in short_conditions if c) / len(short_conditions)
+        long_conditions_met = sum(1 for c in long_conditions if c) / len(long_conditions)
+
+        if short_conditions_met >= min_conditions_pct and short_score >= min_score and short_score > long_score:
+            signal_direction = "SHORT"
+            entry_score = short_score
+            logger.info(f"Condições para SHORT em range atendidas com score {short_score:.2f}")
+        elif long_conditions_met >= min_conditions_pct and long_score >= min_score and long_score > short_score:
+            signal_direction = "LONG"
+            entry_score = long_score
+            logger.info(f"Condições para LONG em range atendidas com score {long_score:.2f}")
         else:
-            # Sem condições suficientes para gerar sinal
-            logger.info("Condições insuficientes para gerar sinal em mercado em range")
+            logger.info(f"Condições insuficientes para gerar sinal neste ciclo")
             return None
 
-        prediction = self.prediction_service.predict_tp_sl(df, current_price, signal_direction)
-        if prediction is None:
-            return None
+        # Se chegamos aqui, temos uma direção definida para o sinal
+        if signal_direction:
+            # Usar o serviço de previsão para obter TP/SL
+            prediction = self.prediction_service.predict_tp_sl(df, current_price, signal_direction)
+            if prediction is None:
+                return None
 
-        predicted_tp_pct, predicted_sl_pct, atr_value = prediction
+            predicted_tp_pct, predicted_sl_pct = prediction
+
+            # Limitar TP ao range em mercados laterais
+            if signal_direction == "LONG":
+                # Calcular o máximo TP possível (até próximo da resistência)
+                max_tp_pct = ((upper_bound * 0.995) - current_price) / current_price * 100
+
+                # Se o TP previsto for maior que o máximo possível, ajustar
+                if predicted_tp_pct > max_tp_pct:
+                    logger.info(
+                        f"Ajustando TP para respeitar o limite superior do range: {predicted_tp_pct:.2f}% -> {max_tp_pct:.2f}%"
+                    )
+                    predicted_tp_pct = max_tp_pct
+            else:  # SHORT
+                # Calcular o máximo TP possível (até próximo do suporte)
+                max_tp_pct = (current_price - (lower_bound * 1.005)) / current_price * 100
+
+                # Se o TP previsto (em módulo) for maior que o máximo possível, ajustar
+                if abs(predicted_tp_pct) > max_tp_pct:
+                    logger.info(
+                        f"Ajustando TP para respeitar o limite inferior do range: {predicted_tp_pct:.2f}% -> {-max_tp_pct:.2f}%"
+                    )
+                    predicted_tp_pct = -max_tp_pct
 
         # Avaliar a qualidade da entrada
-        should_enter, entry_score = self.evaluate_entry_quality(
-            df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct
+        should_enter, final_entry_score = self.evaluate_entry_quality(
+            df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct,
+            entry_threshold=self.config.entry_threshold
         )
 
+        # Combinar o score da avaliação de qualidade com o score de condições
+        final_entry_score = 0.6 * final_entry_score + 0.4 * entry_score
+
         if not should_enter:
-            logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
+            logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {final_entry_score:.2f})")
             return None
+
+        # TP em múltiplos níveis para trade em range
+        # Em mercados laterais, é recomendável ter 2 níveis de TP
+        tp_levels = []
+
+        # Primeira parte = 2/3 do movimento (saída antecipada próximo ao extremo)
+        first_tp_pct = predicted_tp_pct * 0.67
+        # Segunda parte = movimento completo
+        second_tp_pct = predicted_tp_pct
+
+        tp_levels = [first_tp_pct, second_tp_pct]
+        tp_percents = [60, 40]  # 60% na primeira saída, 40% na segunda
 
         # Configurar side e position_side para a Binance
         if signal_direction == "LONG":
@@ -268,16 +809,20 @@ class RangeStrategy(BaseStrategy):
         tp_price = current_price * tp_factor
         sl_price = current_price * sl_factor
 
-        # Gerar ID único para o sinal
-        signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
-
         # Obter ATR para ajustes de quantidade
         atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+
+        # Calcular a razão Risco:Recompensa
+        rr_ratio = abs(predicted_tp_pct / predicted_sl_pct)
 
         # Determinar tendência e força
         market_trend = "NEUTRAL"  # Em range, a tendência é neutra
         market_strength = "WEAK_TREND" if df['adx'].iloc[-1] < 20 else "MODERATE_TREND"
 
+        # Gerar ID único para o sinal
+        signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+        # Criar o sinal
         signal = TradingSignal(
             id=signal_id,
             direction=signal_direction,
@@ -291,11 +836,19 @@ class RangeStrategy(BaseStrategy):
             tp_factor=tp_factor,
             sl_factor=sl_factor,
             atr_value=atr_value,
-            entry_score=entry_score,
-            rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+            entry_score=final_entry_score,
+            rr_ratio=rr_ratio,
             market_trend=market_trend,
             market_strength=market_strength,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            # Campos adicionais para gerenciamento de risco avançado
+            mtf_details={
+                'tp_levels': tp_levels,
+                'tp_percents': tp_percents,
+                'range_high': upper_bound,
+                'range_low': lower_bound,
+                'range_width_pct': (range_width / lower_bound) * 100
+            } if 'mtf_details' in TradingSignal.__annotations__ else None
         )
 
         return signal
@@ -332,43 +885,95 @@ class RangeStrategy(BaseStrategy):
             # Verificar se RR é bom o suficiente
             should_enter = rr_ratio >= self.config.min_rr_ratio
 
-            # Pontuação básica baseada em RR
+            # Pontuação básica baseada em R:R
             entry_score = min(1.0, rr_ratio / 3.0)  # Pontuação de 0 a 1
         else:
             # Valores padrão se tp e sl não forem fornecidos
             should_enter = False
             entry_score = 0.0
 
-        # Verificar proximidade às bandas de Bollinger
-        if 'boll_lband' in df.columns and 'boll_hband' in df.columns:
-            lower_band = df['boll_lband'].iloc[-1]
-            upper_band = df['boll_hband'].iloc[-1]
+        # Verificar proximidade aos extremos do range
+        if self.range_high is not None and self.range_low is not None:
+            range_mid = (self.range_high + self.range_low) / 2
 
-            # Calcular proximidade com as bandas
-            dist_to_lower = (current_price - lower_band) / current_price * 100
-            dist_to_upper = (upper_band - current_price) / current_price * 100
+            # Para LONG, verifique se estamos próximo do suporte (mínimo do range)
+            if trade_direction == "LONG":
+                # Quanto mais próximo do mínimo, melhor
+                distance_to_min = (current_price - self.range_low) / (self.range_high - self.range_low)
+                if distance_to_min < 0.2:  # Nos 20% inferiores do range
+                    range_bonus = (0.2 - distance_to_min) * 1.5
+                    entry_score = min(1.0, entry_score + range_bonus)
+                    logger.info(f"Bônus para LONG próximo ao suporte: {range_bonus:.2f}")
 
-            if trade_direction == "LONG" and dist_to_lower < 0.3:
-                # Bônus para LONG perto do suporte
-                entry_score = min(1.0, entry_score * 1.3)
-            elif trade_direction == "SHORT" and dist_to_upper < 0.3:
-                # Bônus para SHORT perto da resistência
-                entry_score = min(1.0, entry_score * 1.3)
+                # Penalidade se estamos acima do meio do range
+                elif current_price > range_mid:
+                    range_penalty = (current_price - range_mid) / (self.range_high - range_mid) * 0.3
+                    entry_score = max(0.0, entry_score - range_penalty)
+                    logger.info(f"Penalidade para LONG acima do meio do range: {range_penalty:.2f}")
 
-        # Verificar RSI se disponível
+            # Para SHORT, verifique se estamos próximo da resistência (máximo do range)
+            elif trade_direction == "SHORT":
+                # Quanto mais próximo do máximo, melhor
+                distance_to_max = (self.range_high - current_price) / (self.range_high - self.range_low)
+                if distance_to_max < 0.2:  # Nos 20% superiores do range
+                    range_bonus = (0.2 - distance_to_max) * 1.5
+                    entry_score = min(1.0, entry_score + range_bonus)
+                    logger.info(f"Bônus para SHORT próximo à resistência: {range_bonus:.2f}")
+
+                # Penalidade se estamos abaixo do meio do range
+                elif current_price < range_mid:
+                    range_penalty = (range_mid - current_price) / (range_mid - self.range_low) * 0.3
+                    entry_score = max(0.0, entry_score - range_penalty)
+                    logger.info(f"Penalidade para SHORT abaixo do meio do range: {range_penalty:.2f}")
+
+        # Verificar osciladores para confirmação
         if 'rsi' in df.columns:
             rsi = df['rsi'].iloc[-1]
             if trade_direction == "LONG" and rsi < 30:
-                # Bônus para trades LONG quando RSI está baixo (sobrevenda)
-                entry_score = min(1.0, entry_score * 1.2)
+                # Bônus para LONG em sobrevenda
+                rsi_bonus = min((30 - rsi) / 30, 0.7) * 0.25
+                entry_score = min(1.0, entry_score + rsi_bonus)
+                logger.info(f"Bônus para LONG com RSI em sobrevenda ({rsi:.1f}): {rsi_bonus:.2f}")
             elif trade_direction == "SHORT" and rsi > 70:
-                # Bônus para trades SHORT quando RSI está alto (sobrecompra)
-                entry_score = min(1.0, entry_score * 1.2)
+                # Bônus para SHORT em sobrecompra
+                rsi_bonus = min((rsi - 70) / 30, 0.7) * 0.25
+                entry_score = min(1.0, entry_score + rsi_bonus)
+                logger.info(f"Bônus para SHORT com RSI em sobrecompra ({rsi:.1f}): {rsi_bonus:.2f}")
+
+        # Verificar stochastic
+        if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
+            stoch_k = df['stoch_k'].iloc[-1]
+            stoch_d = df['stoch_d'].iloc[-1]
+            if trade_direction == "LONG" and stoch_k < 20 and stoch_d < 20:
+                # Bônus para LONG com Stoch em sobrevenda
+                stoch_bonus = 0.15
+                entry_score = min(1.0, entry_score + stoch_bonus)
+                logger.info(f"Bônus para LONG com Stochastic em sobrevenda ({stoch_k:.1f}): {stoch_bonus:.2f}")
+            elif trade_direction == "SHORT" and stoch_k > 80 and stoch_d > 80:
+                # Bônus para SHORT com Stoch em sobrecompra
+                stoch_bonus = 0.15
+                entry_score = min(1.0, entry_score + stoch_bonus)
+                logger.info(f"Bônus para SHORT com Stochastic em sobrecompra ({stoch_k:.1f}): {stoch_bonus:.2f}")
+
+        # Verificar volume
+        if 'volume' in df.columns and len(df) > 5:
+            current_volume = df['volume'].iloc[-1]
+            avg_volume = df['volume'].iloc[-5:].mean()
+
+            # Em mercados de range, volume alto em extremos é bom sinal de reversão
+            if current_volume > avg_volume * 1.5:
+                volume_bonus = min((current_volume / avg_volume - 1) * 0.3, 0.15)
+                entry_score = min(1.0, entry_score + volume_bonus)
+                logger.info(f"Bônus para volume alto no extremo do range: {volume_bonus:.2f}")
 
         # Em range, o alinhamento MTF pode ser menos importante
         if mtf_alignment is not None:
-            # Apenas pequeno bônus para alinhamento forte
-            entry_score = min(1.0, entry_score * (1.0 + (mtf_alignment - 0.5) * 0.5))
+            # Se o MTF é neutro (value~0.5), isso é bom para range trading
+            mtf_neutrality = 1.0 - abs(mtf_alignment - 0.5) * 2
+            if mtf_neutrality > 0.6:  # MTF relativamente neutro
+                mtf_bonus = mtf_neutrality * 0.15
+                entry_score = min(1.0, entry_score + mtf_bonus)
+                logger.info(f"Bônus para MTF neutro: {mtf_bonus:.2f}")
 
         # Usar limiar de entrada da configuração se não for fornecido
         if entry_threshold is None:
@@ -382,55 +987,69 @@ class RangeStrategy(BaseStrategy):
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
         Ajusta um sinal para mercados em range.
-        Reduz TP e ajusta SL para otimizar operações em range.
+
+        Implementa limites inteligentes para TP e SL com base nos limites do range,
+        e configura take profits parciais para maximizar captura em mercados laterais.
         """
-        # Estimar os limites do range para definir alvos
-        range_high = 0
-        range_low = 0
+        # 1. Identificar os limites do range (se ainda não tivermos)
+        if self.range_high is None or self.range_low is None:
+            self.range_high, self.range_low = self._identify_range_extremes(df)
 
-        # Usando Bollinger Bands para estimar o range
-        range_high = df['boll_hband'].iloc[-1]
-        range_low = df['boll_lband'].iloc[-1]
+        range_high = self.range_high
+        range_low = self.range_low
 
-        # Ajustar TP para não ultrapassar os limites do range
+        # 2. Limitar TP para não ultrapassar os limites do range (margem de segurança)
+        # Para LONG, o TP não deve exceder a resistência
         if signal.direction == "LONG":
-            # Para LONG, TP não deve exceder o topo do range
-            max_tp_price = range_high
-            if signal.tp_price > max_tp_price:
-                new_tp_factor = max_tp_price / signal.current_price
-                new_tp_pct = (new_tp_factor - 1) * 100
+            # Deixar uma margem de 0.5% abaixo da resistência
+            reasonable_tp = range_high * 0.995
 
-                # Atualizar sinal
-                signal.predicted_tp_pct = new_tp_pct
-                signal.tp_factor = new_tp_factor
-                signal.tp_price = max_tp_price
+            # Se o TP previsto for além do razoável, ajustar
+            if signal.tp_price > reasonable_tp:
+                new_tp_pct = ((reasonable_tp / signal.current_price) - 1) * 100
 
+                # Logar a mudança
                 logger.info(
-                    f"TP ajustado para respeitar o topo do range: {new_tp_pct:.2f}% "
-                    f"(preço: {max_tp_price:.2f})"
+                    f"Ajustando TP para respeitar resistência: "
+                    f"{signal.predicted_tp_pct:.2f}% ({signal.tp_price:.2f}) -> "
+                    f"{new_tp_pct:.2f}% ({reasonable_tp:.2f})"
                 )
-        else:  # SHORT
-            # Para SHORT, TP não deve exceder o fundo do range
-            min_tp_price = range_low
-            if signal.tp_price < min_tp_price:
-                new_tp_factor = min_tp_price / signal.current_price
-                new_tp_pct = (1 - new_tp_factor) * 100
 
-                # Atualizar sinal
+                # Atualizar o signal
                 signal.predicted_tp_pct = new_tp_pct
-                signal.tp_factor = new_tp_factor
-                signal.tp_price = min_tp_price
+                signal.tp_price = reasonable_tp
+                signal.tp_factor = reasonable_tp / signal.current_price
 
+        # Para SHORT, o TP não deve exceder o suporte
+        elif signal.direction == "SHORT":
+            # Deixar uma margem de 0.5% acima do suporte
+            reasonable_tp = range_low * 1.005
+
+            # Se o TP previsto for além do razoável, ajustar
+            if signal.tp_price < reasonable_tp:
+                new_tp_pct = ((signal.current_price / reasonable_tp) - 1) * 100
+
+                # Logar a mudança
                 logger.info(
-                    f"TP ajustado para respeitar o fundo do range: {new_tp_pct:.2f}% "
-                    f"(preço: {min_tp_price:.2f})"
+                    f"Ajustando TP para respeitar suporte: "
+                    f"{signal.predicted_tp_pct:.2f}% ({signal.tp_price:.2f}) -> "
+                    f"{-new_tp_pct:.2f}% ({reasonable_tp:.2f})"
                 )
+
+                # Atualizar o signal (TP para short é negativo)
+                signal.predicted_tp_pct = -new_tp_pct
+                signal.tp_price = reasonable_tp
+                signal.tp_factor = reasonable_tp / signal.current_price
+
+        # 3. Ajustar TP/SL usando os fatores de configuração
+        original_tp = signal.predicted_tp_pct
+        original_sl = signal.predicted_sl_pct
 
         # Aplicar ajustes gerais da estratégia
-        signal.predicted_tp_pct = signal.predicted_tp_pct * self.config.tp_adjustment
-        signal.predicted_sl_pct = signal.predicted_sl_pct * self.config.sl_adjustment
+        signal.predicted_tp_pct = original_tp * self.config.tp_adjustment
+        signal.predicted_sl_pct = original_sl * self.config.sl_adjustment
 
-        # Recalcular preços com base nos percentuais ajustados
+        # 4. Recalcular preços e fatores
         if signal.direction == "LONG":
             signal.tp_factor = 1 + (signal.predicted_tp_pct / 100)
             signal.sl_factor = 1 - (signal.predicted_sl_pct / 100)
@@ -441,13 +1060,45 @@ class RangeStrategy(BaseStrategy):
         signal.tp_price = signal.current_price * signal.tp_factor
         signal.sl_price = signal.current_price * signal.sl_factor
 
-        # Atualizar a razão R:R
+        # 5. Definir take profits parciais
+        # Em mercados laterais, é melhor ter saídas parciais antes do extremo
+        tp_levels = []
+        tp_percents = []
+
+        # Calcular com base na largura do range
+        range_width_pct = ((range_high - range_low) / range_low) * 100
+
+        # Se o range for amplo, pode valer a pena ter 3 saídas
+        if range_width_pct > 3.0:
+            tp_levels = [
+                signal.predicted_tp_pct * 0.4,  # 40% do movimento
+                signal.predicted_tp_pct * 0.7,  # 70% do movimento
+                signal.predicted_tp_pct  # movimento completo
+            ]
+            tp_percents = [40, 40, 20]  # 40%, 40%, 20%
+        else:
+            # Range mais estreito, apenas 2 saídas
+            tp_levels = [
+                signal.predicted_tp_pct * 0.6,  # 60% do movimento
+                signal.predicted_tp_pct  # movimento completo
+            ]
+            tp_percents = [60, 40]  # 60%, 40%
+
+        # 6. Adicionar dados de TP parcial se a estrutura do sinal suportar
+        if hasattr(signal, 'mtf_details') and signal.mtf_details is not None:
+            signal.mtf_details['tp_levels'] = tp_levels
+            signal.mtf_details['tp_percents'] = tp_percents
+            signal.mtf_details['range_high'] = range_high
+            signal.mtf_details['range_low'] = range_low
+            signal.mtf_details['range_width_pct'] = range_width_pct
+
+        # 7. Atualizar a razão R:R
         signal.rr_ratio = abs(signal.predicted_tp_pct / signal.predicted_sl_pct)
 
         logger.info(
             f"Sinal ajustado para mercado em range: "
             f"TP={signal.predicted_tp_pct:.2f}%, SL={signal.predicted_sl_pct:.2f}%, "
-            f"R:R={signal.rr_ratio:.2f}"
+            f"R:R={signal.rr_ratio:.2f}, TP Níveis: {[f'{tp:.2f}%' for tp in tp_levels]}"
         )
 
         return signal
