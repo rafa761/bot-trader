@@ -1,8 +1,6 @@
 # services/trading_bot.py
 import asyncio
 
-import numpy as np
-
 from core.config import settings
 from core.logger import logger
 from models.lstm.model import LSTMModel
@@ -73,26 +71,6 @@ class TradingBot:
 
         logger.info("TradingBot SOLID inicializado com sucesso.")
 
-    def get_historical_data_for_retraining(self) -> np.ndarray:
-        """
-        Retorna os dados históricos para retreinamento dos modelos.
-        Esta função é usada como callback pelo ModelRetrainer.
-
-        Returns:
-            np.ndarray: Array com dados históricos
-        """
-        try:
-            df = self.data_handler.historical_df
-            if df is not None and not df.empty:
-                df_copy = df.copy()
-                logger.info(f"Fornecendo {len(df_copy)} registros para retreinamento")
-                return df_copy
-            logger.warning("Sem dados históricos disponíveis para retreinamento")
-            return np.array([])
-        except Exception as e:
-            logger.error(f"Erro ao obter dados históricos para retreinamento: {e}", exc_info=True)
-            return np.array([])
-
     async def initialize(self) -> None:
         """Inicializa todos os componentes do bot."""
         await self.data_provider.initialize()
@@ -105,7 +83,6 @@ class TradingBot:
         )
 
         logger.info("TradingBot inicializado e pronto para operar.")
-
 
     async def _log_system_summary(self) -> None:
         """Log do resumo do sistema com informações multi-timeframe."""
@@ -139,13 +116,14 @@ class TradingBot:
             strategy_details = self.strategy_manager.get_strategy_details()
             if strategy_details.active:
                 config = strategy_details.config
-                logger.info(f"Configuração da estratégia: "
-                            f"TP ajuste={config.tp_adjustment}, "
-                            f"SL ajuste={config.sl_adjustment}")
+                logger.info(
+                    f"Configuração da estratégia: "
+                    f"TP ajuste={config.tp_adjustment}, "
+                    f"SL ajuste={config.sl_adjustment}"
+                )
                 logger.info(f"Min R:R={config.min_rr_ratio}, Threshold={config.entry_threshold}")
 
         logger.info("=" * 50)
-
 
     async def run(self) -> None:
         """
@@ -184,16 +162,17 @@ class TradingBot:
                     await asyncio.sleep(5)
                     continue
 
-                # 4. Processar análise de mercado UNIFICADA com o gerenciador de estratégias
+                # 4. Processar análise de mercado
                 market_analysis = await self.strategy_manager.process_market_data(df, self.multi_tf_analyzer)
 
                 # Atualizar a estratégia atual para o resumo do sistema
                 self.current_strategy_name = market_analysis.strategy_name
 
                 # 5. Tentar gerar sinal de trading usando o gerenciador de estratégias
-                # Adicionar log detalhado antes da tentativa de geração
                 logger.info(
-                    f"Tentando gerar sinal com estratégia: {self.current_strategy_name}, preço: {current_price}")
+                    f"Tentando gerar sinal com estratégia: {self.current_strategy_name}, "
+                    f"preço: {current_price}"
+                )
                 signal = await self.strategy_manager.generate_signal(df, current_price)
                 if signal:
                     logger.info(
