@@ -1,5 +1,7 @@
 # strategies/volatility_strategies.py
+
 from datetime import datetime
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -244,10 +246,10 @@ class HighVolatilityStrategy(BaseStrategy):
 
         # Decidir direção baseada no maior número de condições (mínimo 2)
         if long_conditions >= 2 and long_conditions >= short_conditions:
-            signal_direction = "LONG"
+            signal_direction: Literal["LONG", "SHORT"] = "LONG"
             logger.info(f"Sinal LONG gerado em alta volatilidade com {long_conditions} condições favoráveis")
         elif short_conditions >= 2 and short_conditions > long_conditions:
-            signal_direction = "SHORT"
+            signal_direction: Literal["LONG", "SHORT"] = "SHORT"
             logger.info(f"Sinal SHORT gerado em alta volatilidade com {short_conditions} condições favoráveis")
         else:
             logger.info(f"Condições insuficientes para sinal: LONG={long_conditions}, SHORT={short_conditions}")
@@ -306,13 +308,13 @@ class HighVolatilityStrategy(BaseStrategy):
 
             # Configurar parâmetros para o sinal
             if signal_direction == "LONG":
-                side = "BUY"
-                position_side = "LONG"
+                side: Literal["SELL", "BUY"] = "BUY"
+                position_side: Literal["LONG", "SHORT"] = "LONG"
                 tp_factor = 1 + (predicted_tp_pct / 100)
                 sl_factor = 1 - (predicted_sl_pct / 100)
             else:  # SHORT
-                side = "SELL"
-                position_side = "SHORT"
+                side: Literal["SELL", "BUY"] = "SELL"
+                position_side: Literal["LONG", "SHORT"] = "SHORT"
                 tp_factor = 1 - (abs(predicted_tp_pct) / 100)
                 sl_factor = 1 + (predicted_sl_pct / 100)
 

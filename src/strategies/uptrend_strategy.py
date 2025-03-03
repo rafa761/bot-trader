@@ -1,5 +1,7 @@
 # strategies/uptrend_strategy.py
+
 from datetime import datetime
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -212,8 +214,8 @@ class UptrendStrategy(BaseStrategy):
                         predicted_sl_pct = (atr_value / current_price) * 100 * 1.5
 
                 # Vamos forçar operações LONG em tendência de alta
-                side = "BUY"
-                position_side = "LONG"
+                side: Literal["SELL", "BUY"] = "BUY"
+                position_side: Literal["LONG", "SHORT"] = "LONG"
                 tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
                 sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
 
