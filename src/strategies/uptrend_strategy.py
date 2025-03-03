@@ -9,6 +9,8 @@ import pandas as pd
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
+from services.prediction.interfaces import IPredictionService
+from services.prediction.lstm_prediction import LSTMPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -33,12 +35,7 @@ class UptrendStrategy(BaseStrategy):
             required_indicators=["ema_short", "ema_long", "adx", "rsi"]
         )
         super().__init__(config)
-        self.tp_model = tp_model
-        self.sl_model = sl_model
-        self.sequence_length = 24
-        # Preprocessador para preparar dados para o modelo
-        self.preprocessor = None
-        self.preprocessor_fitted = False
+        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
@@ -97,7 +94,8 @@ class UptrendStrategy(BaseStrategy):
             # Adicionar log para entender por que não está detectando pullback
             else:
                 logger.info(
-                    f"Sem pullback: RSI={rsi:.1f} (anterior: {prev_rsi:.1f}), condições: {rsi < 40} e {rsi < prev_rsi}")
+                    f"Sem pullback: RSI={rsi:.1f} (anterior: {prev_rsi:.1f}), condições: {rsi < 40} e {rsi < prev_rsi}"
+                )
 
         # Verificar suporte na média móvel
         near_support = False
@@ -162,7 +160,8 @@ class UptrendStrategy(BaseStrategy):
         # Adicionar ao conjunto de condições a tendência forte e alinhamento MTF
         # Isso aumenta as chances de um sinal ser gerado
         conditions_met = sum(
-            [in_pullback, near_support, stoch_oversold, bounce_from_support, strong_trend, mtf_aligned])
+            [in_pullback, near_support, stoch_oversold, bounce_from_support, strong_trend, mtf_aligned]
+        )
 
         # Número mínimo de condições para geração de sinais
         min_conditions = 2
@@ -181,88 +180,64 @@ class UptrendStrategy(BaseStrategy):
                 f"Bounce={bounce_from_support}, Strong_Trend={strong_trend}, MTF_Aligned={mtf_aligned}"
             )
 
-            # Gerar previsões usando os modelos LSTM
-            try:
-                X_seq = self._prepare_sequence(df)
-                if X_seq is None:
-                    return None
-
-                # Previsões com LSTM
-                predicted_tp_pct = float(self.tp_model.predict(X_seq)[0][0])
-                predicted_sl_pct = float(self.sl_model.predict(X_seq)[0][0])
-
-                # Gerar ID único para o sinal
-                signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
-
-                # Garantir valores positivos para SL
-                predicted_sl_pct = abs(predicted_sl_pct)
-
-                logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-                # Validar previsões - evitar valores absurdos ou muito pequenos
-                if abs(predicted_tp_pct) > 20:
-                    predicted_tp_pct = 20.0 if predicted_tp_pct > 0 else -20.0
-
-                if predicted_sl_pct > 10:
-                    predicted_sl_pct = 10.0
-
-                # Ajustar SL dinamicamente se for muito pequeno
-                if predicted_sl_pct < 0.5:
-                    # Calcular o SL dinâmico baseado em ATR
-                    atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-                    if atr_value:
-                        predicted_sl_pct = (atr_value / current_price) * 100 * 1.5
-
-                # Vamos forçar operações LONG em tendência de alta
-                side: Literal["SELL", "BUY"] = "BUY"
-                position_side: Literal["LONG", "SHORT"] = "LONG"
-                tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
-                sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
-
-                # Calcular preços TP/SL
-                tp_price = current_price * tp_factor
-                sl_price = current_price * sl_factor
-
-                # Avaliar a qualidade da entrada
-                should_enter, entry_score = self.evaluate_entry_quality(
-                    df, current_price, "LONG", predicted_tp_pct, predicted_sl_pct
-                )
-
-                if not should_enter:
-                    logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
-                    return None
-
-                # Obter ATR para ajustes de quantidade
-                atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-
-                # Determinar tendência e força
-                market_trend = "UPTREND"  # Já sabemos que estamos em uptrend
-                market_strength = "STRONG_TREND" if df['adx'].iloc[-1] > 25 else "WEAK_TREND"
-
-                signal = TradingSignal(
-                    id=signal_id,
-                    direction="LONG",
-                    side=side,
-                    position_side=position_side,
-                    predicted_tp_pct=predicted_tp_pct,
-                    predicted_sl_pct=predicted_sl_pct,
-                    tp_price=tp_price,
-                    sl_price=sl_price,
-                    current_price=current_price,
-                    tp_factor=tp_factor,
-                    sl_factor=sl_factor,
-                    atr_value=atr_value,
-                    entry_score=entry_score,
-                    rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
-                    market_trend=market_trend,
-                    market_strength=market_strength,
-                    timestamp=datetime.now()
-                )
-
-                return signal
-            except Exception as e:
-                logger.error(f"Erro na geração de sinal: {e}", exc_info=True)
+            prediction = self.prediction_service.predict_tp_sl(
+                df, current_price, "LONG"
+            )  # Sempre LONG para uptrend
+            if prediction is None:
                 return None
+
+            predicted_tp_pct, predicted_sl_pct = prediction
+
+            # Vamos forçar operações LONG em tendência de alta
+            side: Literal["SELL", "BUY"] = "BUY"
+            position_side: Literal["LONG", "SHORT"] = "LONG"
+            tp_factor = 1 + max(abs(predicted_tp_pct) / 100, 0.02)
+            sl_factor = 1 - max(abs(predicted_sl_pct) / 100, 0.005)
+
+            # Calcular preços TP/SL
+            tp_price = current_price * tp_factor
+            sl_price = current_price * sl_factor
+
+            # Avaliar a qualidade da entrada
+            should_enter, entry_score = self.evaluate_entry_quality(
+                df, current_price, "LONG", predicted_tp_pct, predicted_sl_pct
+            )
+
+            if not should_enter:
+                logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
+                return None
+
+            # Gerar ID único para o sinal
+            signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+            # Obter ATR para ajustes de quantidade
+            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
+
+            # Determinar tendência e força
+            market_trend = "UPTREND"  # Já sabemos que estamos em uptrend
+            market_strength = "STRONG_TREND" if df['adx'].iloc[-1] > 25 else "WEAK_TREND"
+
+            signal = TradingSignal(
+                id=signal_id,
+                direction="LONG",
+                side=side,
+                position_side=position_side,
+                predicted_tp_pct=predicted_tp_pct,
+                predicted_sl_pct=predicted_sl_pct,
+                tp_price=tp_price,
+                sl_price=sl_price,
+                current_price=current_price,
+                tp_factor=tp_factor,
+                sl_factor=sl_factor,
+                atr_value=atr_value,
+                entry_score=entry_score,
+                rr_ratio=abs(predicted_tp_pct / predicted_sl_pct),
+                market_trend=market_trend,
+                market_strength=market_strength,
+                timestamp=datetime.now()
+            )
+
+            return signal
 
         return None
 
@@ -336,44 +311,6 @@ class UptrendStrategy(BaseStrategy):
         should_enter = entry_score >= entry_threshold
 
         return should_enter, entry_score
-
-    def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """
-        Prepara uma sequência para previsão com modelo LSTM.
-
-        Args:
-            df: DataFrame com dados históricos
-
-        Returns:
-            np.ndarray: Sequência formatada para o modelo LSTM ou None se houver erro
-        """
-        try:
-            from core.constants import FEATURE_COLUMNS
-            from repositories.data_preprocessor import DataPreprocessor
-
-            # Verificar se temos dados suficientes
-            if len(df) < self.sequence_length:
-                return None
-
-            # Inicializar preprocessador se necessário
-            if self.preprocessor is None:
-                self.preprocessor = DataPreprocessor(
-                    feature_columns=FEATURE_COLUMNS,
-                    outlier_method='iqr',
-                    scaling_method='robust'
-                )
-                self.preprocessor.fit(df)
-
-            # Preparar a sequência
-            x_pred = self.preprocessor.prepare_sequence_for_prediction(
-                df, sequence_length=self.sequence_length
-            )
-
-            return x_pred
-
-        except Exception as e:
-            logger.error(f"Erro ao preparar sequência: {e}", exc_info=True)
-            return None
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
