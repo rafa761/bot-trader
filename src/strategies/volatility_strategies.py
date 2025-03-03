@@ -261,23 +261,7 @@ class HighVolatilityStrategy(BaseStrategy):
         if prediction is None:
             return None
 
-        predicted_tp_pct, predicted_sl_pct, atr_value = prediction
-
-        # Ajustar direção do TP para SHORT
-        if signal_direction == "SHORT" and predicted_tp_pct > 0:
-            predicted_tp_pct = -predicted_tp_pct
-
-        # Garantir valores positivos para SL
-        predicted_sl_pct = abs(predicted_sl_pct)
-
-        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-        # Validar previsões - evitar valores absurdos ou muito pequenos
-        if abs(predicted_tp_pct) > 20:
-            predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
-
-        if predicted_sl_pct > 10:
-            predicted_sl_pct = 10.0
+        predicted_tp_pct, predicted_sl_pct = prediction
 
         # Em alta volatilidade, ajustar TP e SL para serem mais conservadores
         if predicted_sl_pct < 0.5:
@@ -773,23 +757,7 @@ class LowVolatilityStrategy(BaseStrategy):
         if prediction is None:
             return None
 
-        predicted_tp_pct, predicted_sl_pct, atr_value = prediction
-
-        # Ajustar direção do TP para SHORT
-        if signal_direction == "SHORT" and predicted_tp_pct > 0:
-            predicted_tp_pct = -predicted_tp_pct
-
-        # Garantir valores positivos para SL
-        predicted_sl_pct = abs(predicted_sl_pct)
-
-        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-        # Validar previsões - evitar valores absurdos
-        if abs(predicted_tp_pct) > 20:
-            predicted_tp_pct = 20.0 if signal_direction == "LONG" else -20.0
-
-        if predicted_sl_pct > 10:
-            predicted_sl_pct = 10.0
+        predicted_tp_pct, predicted_sl_pct = prediction
 
         # Em baixa volatilidade, limitar TP e SL
         # Obter ATR

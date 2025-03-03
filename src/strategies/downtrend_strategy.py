@@ -192,7 +192,7 @@ class DowntrendStrategy(BaseStrategy):
             if prediction is None:
                 return None
 
-            predicted_tp_pct, predicted_sl_pct, atr_value = prediction
+            predicted_tp_pct, predicted_sl_pct = prediction
 
             # Avaliar a qualidade da entrada
             should_enter, entry_score = self.evaluate_entry_quality(
@@ -215,6 +215,9 @@ class DowntrendStrategy(BaseStrategy):
 
             # Gerar ID único para o sinal
             signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
+
+            # Obter ATR para ajustes de quantidade
+            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
 
             # Determinar tendência e força
             market_trend = "DOWNTREND"  # Já sabemos que estamos em downtrend

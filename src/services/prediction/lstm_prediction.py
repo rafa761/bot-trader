@@ -70,7 +70,7 @@ class LSTMPredictionService(IPredictionService):
     def predict_tp_sl(
             self, df: pd.DataFrame, current_price: float,
             signal_direction: Literal["LONG", "SHORT"]
-    ) -> tuple[float, float, float] | None:
+    ) -> tuple[float, float] | None:
         """
         Realiza previsões de TP e SL usando modelos LSTM.
 
@@ -115,11 +115,7 @@ class LSTMPredictionService(IPredictionService):
                 if atr_value:
                     predicted_sl_pct = (atr_value / current_price) * 100 * 1.5
 
-            # Se ainda não obtivemos o ATR, mas precisamos para outros cálculos
-            if atr_value is None and 'atr' in df.columns:
-                atr_value = df['atr'].iloc[-1]
-
-            return predicted_tp_pct, predicted_sl_pct, atr_value
+            return predicted_tp_pct, predicted_sl_pct
 
         except Exception as e:
             logger.error(f"Erro ao fazer previsões LSTM: {e}", exc_info=True)

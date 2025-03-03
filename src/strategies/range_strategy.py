@@ -244,29 +244,6 @@ class RangeStrategy(BaseStrategy):
 
         predicted_tp_pct, predicted_sl_pct, atr_value = prediction
 
-        # Garantir direção correta para TP em SHORT
-        if signal_direction == "SHORT" and predicted_tp_pct > 0:
-            predicted_tp_pct = -predicted_tp_pct
-
-        # Garantir valores positivos para SL
-        predicted_sl_pct = abs(predicted_sl_pct)
-
-        logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-        # Validar previsões
-        if abs(predicted_tp_pct) > 20:
-            predicted_tp_pct = 20.0 if predicted_tp_pct > 0 else -20.0
-
-        if predicted_sl_pct > 10:
-            predicted_sl_pct = 10.0
-
-        # Ajustar SL dinamicamente se for muito pequeno
-        if predicted_sl_pct < 0.5:
-            # Calcular o SL dinâmico baseado em ATR
-            atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-            if atr_value:
-                predicted_sl_pct = (atr_value / current_price) * 100 * 1.5
-
         # Avaliar a qualidade da entrada
         should_enter, entry_score = self.evaluate_entry_quality(
             df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct

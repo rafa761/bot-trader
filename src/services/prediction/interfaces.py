@@ -19,6 +19,6 @@ class IPredictionService(ABC):
     def predict_tp_sl(
             self, df: pd.DataFrame, current_price: float,
             signal_direction: Literal["LONG", "SHORT"]
-    ) -> tuple[float, float, float] | None:
+    ) -> tuple[float, float] | None:
         """Prediz TP/SL e retorna valores percentuais junto com ATR."""
         pass

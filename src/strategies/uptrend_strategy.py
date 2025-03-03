@@ -186,29 +186,7 @@ class UptrendStrategy(BaseStrategy):
             if prediction is None:
                 return None
 
-            predicted_tp_pct, predicted_sl_pct, atr_value = prediction
-
-            # Gerar ID único para o sinal
-            signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
-
-            # Garantir valores positivos para SL
-            predicted_sl_pct = abs(predicted_sl_pct)
-
-            logger.info(f"Predicted TP: {predicted_tp_pct:.2f}%, Predicted SL: {predicted_sl_pct:.2f}%")
-
-            # Validar previsões - evitar valores absurdos ou muito pequenos
-            if abs(predicted_tp_pct) > 20:
-                predicted_tp_pct = 20.0 if predicted_tp_pct > 0 else -20.0
-
-            if predicted_sl_pct > 10:
-                predicted_sl_pct = 10.0
-
-            # Ajustar SL dinamicamente se for muito pequeno
-            if predicted_sl_pct < 0.5:
-                # Calcular o SL dinâmico baseado em ATR
-                atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
-                if atr_value:
-                    predicted_sl_pct = (atr_value / current_price) * 100 * 1.5
+            predicted_tp_pct, predicted_sl_pct = prediction
 
             # Vamos forçar operações LONG em tendência de alta
             side: Literal["SELL", "BUY"] = "BUY"
@@ -228,6 +206,9 @@ class UptrendStrategy(BaseStrategy):
             if not should_enter:
                 logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
                 return None
+
+            # Gerar ID único para o sinal
+            signal_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{np.random.randint(1000, 9999)}"
 
             # Obter ATR para ajustes de quantidade
             atr_value = df['atr'].iloc[-1] if 'atr' in df.columns else None
