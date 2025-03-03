@@ -6,13 +6,13 @@ import numpy as np
 from core.config import settings
 from core.logger import logger
 from models.lstm.model import LSTMModel
+from repositories.data_handler import DataHandler
 from services.base.interfaces import IOrderExecutor
 from services.base.services import MarketDataProvider
 from services.binance.binance_client import BinanceClient
 from services.binance.binance_data_provider import BinanceDataProvider
 from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
-from services.market_analyzers import MarketTrendAnalyzer
 from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
 from strategies.strategy_manager import StrategyManager
@@ -39,12 +39,10 @@ class TradingBot:
         self.binance_client = BinanceClient()
 
         # Componentes do sistema
-        from repositories.data_handler import DataHandler
         self.data_handler = DataHandler(self.binance_client)
         self.strategy = TradingStrategy()
 
         # Analisador de tendências de mercado
-        self.market_analyzer = MarketTrendAnalyzer()
         self.multi_tf_analyzer = None  # Será inicializado no método initialize()
 
         # Componentes seguindo injeção de dependência
@@ -154,11 +152,6 @@ class TradingBot:
         """
         try:
             await self.initialize()
-
-            # Inicializar o gerenciador de estratégias (se não foi feito no __init__)
-            if not hasattr(self, 'strategy_manager'):
-                self.strategy_manager = StrategyManager()
-                logger.info("Gerenciador de estratégias inicializado")
 
             while True:
                 self.cycle_count += 1

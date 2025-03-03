@@ -5,6 +5,7 @@ import math
 from core.config import settings
 from core.logger import logger
 from services.risk_reward_manager import RiskRewardManager
+from services.trend_analyzer import TrendAnalyzer
 from strategies.strategy_manager import StrategyManager
 
 
@@ -18,7 +19,10 @@ class TradingStrategy:
         """
         Inicializa a estratégia de trading com um gerenciador de risk/reward.
         """
-        self.risk_reward_manager = RiskRewardManager(min_rr_ratio=1.5, atr_multiplier=1.5)
+        self.risk_reward_manager = RiskRewardManager(
+            min_rr_ratio=settings.MIN_RR_RATIO,
+            atr_multiplier=settings.ATR_MULTIPLIER
+        )
 
     def decide_direction(self, predicted_tp_pct: float, predicted_sl_pct: float,
                          threshold: float = 0.2) -> str | None:
@@ -193,7 +197,6 @@ class TradingStrategy:
             tuple[bool, float]: (Deve entrar, pontuação da entrada)
         """
         # Obter informações de tendência
-        from services.trend_analyzer import TrendAnalyzer
         trend = TrendAnalyzer.ema_trend(df)
 
         # Obter valor de ADX para medir força da tendência
@@ -271,14 +274,6 @@ class TradingStrategy:
                     tp_pct=abs(predicted_tp_pct),
                     sl_pct=abs(predicted_sl_pct),
                     trend_strength=trend_alignment
-                ) * volatility_factor
-            else:
-                from services.entry_scorer import EntryScorer
-                quality_score = EntryScorer.calculate_entry_score(
-                    df=df,
-                    current_price=current_price,
-                    trade_direction=trade_direction,
-                    trend_direction=trend
                 ) * volatility_factor
 
         # Se temos alinhamento multi-timeframe, incorporá-lo na avaliação
