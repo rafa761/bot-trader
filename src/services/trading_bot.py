@@ -13,7 +13,7 @@ from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
 from services.order_calculator import OrderCalculator
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
-from strategies.strategy_manager import StrategyManager
+from strategies.managers.strategy_manager import StrategyManager
 
 
 class TradingBot:

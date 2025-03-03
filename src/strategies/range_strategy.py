@@ -1,5 +1,7 @@
 # strategies/range_strategy.py
+
 from datetime import datetime
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -219,14 +221,14 @@ class RangeStrategy(BaseStrategy):
 
         # Selecionar a direção com mais condições favoráveis
         if conditions_long >= 2 and conditions_long > conditions_short:
-            signal_direction = "LONG"
+            signal_direction: Literal["LONG", "SHORT"] = "LONG"
             logger.info(
                 f"Condições para LONG em range: Suporte={near_support}, "
                 f"Oversold={oversold}, Reversão={reversal_pattern}, "
                 f"Compressão={volatility_compression}, MTF_Neutro={mtf_neutral}"
             )
         elif conditions_short >= 2 and conditions_short > conditions_long:
-            signal_direction = "SHORT"
+            signal_direction: Literal["LONG", "SHORT"] = "SHORT"
             logger.info(
                 f"Condições para SHORT em range: Resistência={near_resistance}, "
                 f"Overbought={overbought}, Reversão={reversal_pattern}, "
@@ -281,13 +283,13 @@ class RangeStrategy(BaseStrategy):
 
             # Configurar side e position_side para a Binance
             if signal_direction == "LONG":
-                side = "BUY"
-                position_side = "LONG"
+                side: Literal["SELL", "BUY"] = "BUY"
+                position_side: Literal["LONG", "SHORT"] = "LONG"
                 tp_factor = 1 + (predicted_tp_pct / 100)
                 sl_factor = 1 - (predicted_sl_pct / 100)
             else:  # SHORT
-                side = "SELL"
-                position_side = "SHORT"
+                side: Literal["SELL", "BUY"] = "SELL"
+                position_side: Literal["LONG", "SHORT"] = "SHORT"
                 tp_factor = 1 - (abs(predicted_tp_pct) / 100)
                 sl_factor = 1 + (predicted_sl_pct / 100)
 

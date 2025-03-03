@@ -1,14 +1,13 @@
-# strategies/strategy_manager.py
+# strategies/managers/strategy_manager.py
 
 import pandas as pd
 
 from core.logger import logger
 from models.lstm.model import LSTMModel
-from services.base.schemas import MarketAnalysisResult, MultiTimeFrameDetails, TimeFrameSummary
-from services.base.schemas import TradingSignal
+from services.base.schemas import MarketAnalysisResult, MultiTimeFrameDetails, TimeFrameSummary, TradingSignal
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
-from strategies.base.schemas import StrategyDetails, StrategyConfigSummary
-from strategies.strategy_selector import StrategySelector
+from strategies.base.schemas import StrategyConfigSummary, StrategyDetails
+from strategies.managers.strategy_selector import StrategySelector
 
 
 class StrategyManager:

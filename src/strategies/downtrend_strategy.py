@@ -1,5 +1,7 @@
 # strategies\downtrend_strategy.py
+
 from datetime import datetime
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -222,8 +224,8 @@ class DowntrendStrategy(BaseStrategy):
                     return None
 
                 # Vamos forçar operações SHORT em tendência de baixa
-                side = "SELL"
-                position_side = "SHORT"
+                side: Literal["SELL", "BUY"] = "SELL"
+                position_side: Literal["LONG", "SHORT"] = "SHORT"
                 tp_factor = 1 - abs(predicted_tp_pct) / 100
                 sl_factor = 1 + abs(predicted_sl_pct) / 100
 
