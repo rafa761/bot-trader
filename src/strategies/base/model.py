@@ -199,4 +199,4 @@ class BaseStrategy(IMarketStrategy):
         Returns:
             TradingSignal ou None
         """
-        return None
+        raise NotImplementedError("generate_signal method not implemented")
