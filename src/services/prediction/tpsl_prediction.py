@@ -5,60 +5,94 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from core.constants import FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 from models.lstm.model import LSTMModel
+from models.lstm.schemas import LSTMConfig
 from repositories.data_preprocessor import DataPreprocessor
-from services.prediction.interfaces import IPredictionService
+from services.prediction.interfaces import ITpSlPredictionService
 
 
-class LSTMPredictionService(IPredictionService):
+class TpSlPredictionService(ITpSlPredictionService):
     """Serviço de previsão utilizando modelos LSTM."""
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel, sequence_length: int = 24):
-        """
-        Inicializa o serviço de previsão LSTM.
+    def __init__(self):
+        """ Inicializa o serviço de previsão LSTM. """
+        self.tp_model: LSTMModel | None = None
+        self.sl_model: LSTMModel | None = None
 
-        Args:
-            tp_model: Modelo LSTM para previsão de Take Profit
-            sl_model: Modelo LSTM para previsão de Stop Loss
-            sequence_length: Tamanho da sequência para previsão (default=24)
-        """
-        self.tp_model = tp_model
-        self.sl_model = sl_model
-        self.sequence_length = sequence_length
-        self.preprocessor = None
+        # Componente de preprocessador de dados
+        self.preprocessor: DataPreprocessor = DataPreprocessor(
+            feature_columns=FEATURE_COLUMNS,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
 
-    def prepare_sequence(self, df: pd.DataFrame, sequence_length: int = None) -> np.ndarray | None:
+        self.model_loaded: bool = False
+
+        # Define o tamanho padrao da sequência
+        self.default_sequence_length = 24
+
+    def load_model(self):
+        try:
+            # Configurações básicas para carregamento dos modelos
+            tp_config = LSTMConfig(
+                model_name="lstm_btc_take_profit_pct",
+                version="1.1.0",
+                description="Modelo LSTM para previsão de take profit do Bitcoin"
+            )
+
+            sl_config = LSTMConfig(
+                model_name="lstm_btc_stop_loss_pct",
+                version="1.1.0",
+                description="Modelo LSTM para previsão de stop loss do Bitcoin"
+            )
+
+            # Caminhos para os modelos treinados
+            tp_model_path = TRAINED_MODELS_DIR / "lstm_btc_take_profit_pct.keras"
+            sl_model_path = TRAINED_MODELS_DIR / "lstm_btc_stop_loss_pct.keras"
+
+            # Verificação de existência dos arquivos
+            if not tp_model_path.exists():
+                logger.error(f"Modelo take profit não encontrado em {tp_model_path}")
+                return
+
+            if not sl_model_path.exists():
+                logger.error(f"Modelo stop loss não encontrado em {sl_model_path}")
+                return
+
+            # Carregamento dos modelos
+            self.tp_model = LSTMModel.load(tp_model_path, tp_config)
+            self.sl_model = LSTMModel.load(sl_model_path, sl_config)
+
+            logger.info("Modelos LSTM carregados com sucesso!")
+
+        except Exception as e:
+            logger.error(f"Erro ao carregar modelos LSTM: {e}", exc_info=True)
+            return
+
+        self.model_loaded = True
+
+    def prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
         """
-        Prepara uma sequência para previsão com modelo LSTM.
+        Prepara uma sequência para previsão.
 
         Args:
             df: DataFrame com dados históricos
-            sequence_length: Tamanho da sequência (opcional, usa o padrão da classe se não especificado)
 
         Returns:
             np.ndarray: Sequência formatada ou None se houver erro
         """
         try:
-            seq_len = sequence_length or self.sequence_length
-
             # Verificar se temos dados suficientes
-            if len(df) < seq_len:
+            if len(df) < self.default_sequence_length:
                 return None
 
-            # Inicializar preprocessador se necessário
-            if self.preprocessor is None:
-                self.preprocessor = DataPreprocessor(
-                    feature_columns=FEATURE_COLUMNS,
-                    outlier_method='iqr',
-                    scaling_method='robust'
-                )
-                self.preprocessor.fit(df)
+            self.preprocessor.fit(df)
 
             # Preparar a sequência
             x_pred = self.preprocessor.prepare_sequence_for_prediction(
-                df, sequence_length=seq_len
+                df, sequence_length=self.default_sequence_length
             )
 
             return x_pred
@@ -82,6 +116,9 @@ class LSTMPredictionService(IPredictionService):
         Returns:
             tuple: (predicted_tp_pct, predicted_sl_pct, atr_value) ou None se falhar
         """
+        if not self.model_loaded:
+            self.load_model()
+
         try:
             X_seq = self.prepare_sequence(df)
             if X_seq is None:

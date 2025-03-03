@@ -7,10 +7,9 @@ import numpy as np
 import pandas as pd
 
 from core.logger import logger
-from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
-from services.prediction.interfaces import IPredictionService
-from services.prediction.lstm_prediction import LSTMPredictionService
+from services.prediction.interfaces import ITpSlPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -20,7 +19,7 @@ class RangeStrategy(BaseStrategy):
     Foca em capturar movimentos de reversão dos extremos do range.
     """
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
+    def __init__(self):
         """Inicializa a estratégia com configuração otimizada para mercados em range."""
         config = StrategyConfig(
             name="Range Strategy",
@@ -35,7 +34,7 @@ class RangeStrategy(BaseStrategy):
             required_indicators=["adx", "boll_width", "rsi", "boll_lband", "boll_hband"]
         )
         super().__init__(config)
-        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
