@@ -3,7 +3,6 @@ import asyncio
 
 from core.config import settings
 from core.logger import logger
-from models.lstm.model import LSTMModel
 from repositories.data_handler import DataHandler
 from services.base.interfaces import IOrderExecutor
 from services.base.services import MarketDataProvider
@@ -25,14 +24,8 @@ class TradingBot:
     a componentes especializados.
     """
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
-        """
-        Inicializa o bot de trading com os modelos LSTM.
-
-        Args:
-            tp_model: Modelo LSTM para previsão de Take Profit
-            sl_model: Modelo LSTM para previsão de Stop Loss
-        """
+    def __init__(self):
+        """ Inicializa o bot de trading. """
         # Cliente Binance
         self.binance_client = BinanceClient()
 
@@ -55,7 +48,7 @@ class TradingBot:
         )
 
         # Gerenciador de estratégias centralizado
-        self.strategy_manager = StrategyManager(tp_model=tp_model, sl_model=sl_model)
+        self.strategy_manager = StrategyManager()
 
         # Estratégia atual (mantido para compatibilidade com os logs)
         self.current_strategy_name = "Não definida"

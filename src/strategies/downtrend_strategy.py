@@ -7,9 +7,8 @@ import numpy as np
 import pandas as pd
 
 from core.logger import logger
-from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
-from services.prediction.interfaces import IPredictionService
+from services.prediction.interfaces import ITpSlPredictionService
 from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
@@ -20,7 +19,7 @@ class DowntrendStrategy(BaseStrategy):
     Foca em capturar continuações da tendência de baixa com entradas em rallies.
     """
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
+    def __init__(self):
         """Inicializa a estratégia com configuração otimizada para mercados em baixa."""
         config = StrategyConfig(
             name="Downtrend Strategy",
@@ -35,7 +34,7 @@ class DowntrendStrategy(BaseStrategy):
             required_indicators=["ema_short", "ema_long", "adx", "rsi"]
         )
         super().__init__(config)
-        self.prediction_service: IPredictionService = TpSlPredictionService(tp_model, sl_model)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """

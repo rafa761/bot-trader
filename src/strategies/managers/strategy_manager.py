@@ -3,7 +3,6 @@
 import pandas as pd
 
 from core.logger import logger
-from models.lstm.model import LSTMModel
 from services.base.schemas import MarketAnalysisResult, MultiTimeFrameDetails, TimeFrameSummary, TradingSignal
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
 from strategies.base.schemas import StrategyConfigSummary, StrategyDetails
@@ -19,9 +18,9 @@ class StrategyManager:
     evitando duplicação de análises e conflitos entre componentes.
     """
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
+    def __init__(self):
         """Inicializa o gerenciador de estratégias."""
-        self.strategy_selector = StrategySelector(tp_model, sl_model)
+        self.strategy_selector = StrategySelector()
         logger.info("Gerenciador de estratégias inicializado")
 
         # Armazenar dados da última análise multi-timeframe

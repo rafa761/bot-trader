@@ -3,7 +3,6 @@
 import pandas as pd
 
 from core.logger import logger
-from models.lstm.model import LSTMModel
 from strategies.base.model import IMarketStrategy, MarketCondition
 from strategies.downtrend_strategy import DowntrendStrategy
 from strategies.range_strategy import RangeStrategy
@@ -17,15 +16,15 @@ class StrategySelector:
     Implementa o padrão Strategy do GoF para permitir a troca dinâmica da estratégia em tempo de execução.
     """
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
+    def __init__(self):
         """Inicializa o seletor de estratégias com todas as estratégias disponíveis."""
         # Inicializar todas as estratégias
         self.strategies: dict[MarketCondition, IMarketStrategy] = {
-            MarketCondition.UPTREND: UptrendStrategy(tp_model, sl_model),
-            MarketCondition.DOWNTREND: DowntrendStrategy(tp_model, sl_model),
-            MarketCondition.RANGE: RangeStrategy(tp_model, sl_model),
-            MarketCondition.HIGH_VOLATILITY: HighVolatilityStrategy(tp_model, sl_model),
-            MarketCondition.LOW_VOLATILITY: LowVolatilityStrategy(tp_model, sl_model)
+            MarketCondition.UPTREND: UptrendStrategy(),
+            MarketCondition.DOWNTREND: DowntrendStrategy(),
+            MarketCondition.RANGE: RangeStrategy(),
+            MarketCondition.HIGH_VOLATILITY: HighVolatilityStrategy(),
+            MarketCondition.LOW_VOLATILITY: LowVolatilityStrategy()
         }
 
         # Estratégia atual
