@@ -12,7 +12,6 @@ from services.binance.binance_data_provider import BinanceDataProvider
 from services.binance.binance_order_executor import BinanceOrderExecutor
 from services.cleanup_handler import CleanupHandler
 from services.order_calculator import OrderCalculator
-from services.trading_strategy import TradingStrategy
 from services.trend_analyzer import MultiTimeFrameTrendAnalyzer
 from strategies.strategy_manager import StrategyManager
 
@@ -39,7 +38,6 @@ class TradingBot:
 
         # Componentes do sistema
         self.data_handler = DataHandler(self.binance_client)
-        self.strategy = TradingStrategy()
         self.order_calculator = OrderCalculator()
 
         # Analisador de tendências de mercado
