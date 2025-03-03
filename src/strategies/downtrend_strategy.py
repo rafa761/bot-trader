@@ -10,7 +10,7 @@ from core.logger import logger
 from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
 from services.prediction.interfaces import IPredictionService
-from services.prediction.lstm_prediction import LSTMPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -35,7 +35,7 @@ class DowntrendStrategy(BaseStrategy):
             required_indicators=["ema_short", "ema_long", "adx", "rsi"]
         )
         super().__init__(config)
-        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
+        self.prediction_service: IPredictionService = TpSlPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """

@@ -11,7 +11,7 @@ class IPredictionService(ABC):
     """Interface para serviços de previsão de TP/SL."""
 
     @abstractmethod
-    def prepare_sequence(self, df: pd.DataFrame, sequence_length: int) -> np.ndarray | None:
+    def prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
         """Prepara uma sequência para previsão."""
         pass
 

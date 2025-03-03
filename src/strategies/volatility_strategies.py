@@ -11,7 +11,7 @@ from core.logger import logger
 from models.lstm.model import LSTMModel
 from services.base.schemas import TradingSignal
 from services.prediction.interfaces import IPredictionService
-from services.prediction.lstm_prediction import LSTMPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -37,7 +37,7 @@ class HighVolatilityStrategy(BaseStrategy):
             required_indicators=["adx", "atr", "atr_pct", "boll_width"]
         )
         super().__init__(config)
-        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
+        self.prediction_service: IPredictionService = TpSlPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
@@ -506,7 +506,7 @@ class LowVolatilityStrategy(BaseStrategy):
             required_indicators=["adx", "atr", "atr_pct", "boll_width"]
         )
         super().__init__(config)
-        self.prediction_service: IPredictionService = LSTMPredictionService(tp_model, sl_model)
+        self.prediction_service: IPredictionService = TpSlPredictionService(tp_model, sl_model)
 
     def should_activate(self, df: pd.DataFrame, mtf_data: dict) -> bool:
         """
@@ -923,44 +923,6 @@ class LowVolatilityStrategy(BaseStrategy):
         should_enter = entry_score >= entry_threshold
 
         return should_enter, entry_score
-
-    def _prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
-        """
-        Prepara uma sequência para previsão com modelo LSTM.
-
-        Args:
-            df: DataFrame com dados históricos
-
-        Returns:
-            np.ndarray: Sequência formatada para o modelo LSTM ou None se houver erro
-        """
-        try:
-            from core.constants import FEATURE_COLUMNS
-            from repositories.data_preprocessor import DataPreprocessor
-
-            # Verificar se temos dados suficientes
-            if len(df) < self.sequence_length:
-                return None
-
-            # Inicializar preprocessador se necessário
-            if self.preprocessor is None:
-                self.preprocessor = DataPreprocessor(
-                    feature_columns=FEATURE_COLUMNS,
-                    outlier_method='iqr',
-                    scaling_method='robust'
-                )
-                self.preprocessor.fit(df)
-
-            # Preparar a sequência
-            x_pred = self.preprocessor.prepare_sequence_for_prediction(
-                df, sequence_length=self.sequence_length
-            )
-
-            return x_pred
-
-        except Exception as e:
-            logger.error(f"Erro ao preparar sequência: {e}", exc_info=True)
-            return None
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """

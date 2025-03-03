@@ -12,53 +12,50 @@ from repositories.data_preprocessor import DataPreprocessor
 from services.prediction.interfaces import IPredictionService
 
 
-class LSTMPredictionService(IPredictionService):
+class TpSlPredictionService(IPredictionService):
     """Serviço de previsão utilizando modelos LSTM."""
 
-    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel, sequence_length: int = 24):
+    def __init__(self, tp_model: LSTMModel, sl_model: LSTMModel):
         """
         Inicializa o serviço de previsão LSTM.
 
         Args:
             tp_model: Modelo LSTM para previsão de Take Profit
             sl_model: Modelo LSTM para previsão de Stop Loss
-            sequence_length: Tamanho da sequência para previsão (default=24)
         """
         self.tp_model = tp_model
         self.sl_model = sl_model
-        self.sequence_length = sequence_length
-        self.preprocessor = None
 
-    def prepare_sequence(self, df: pd.DataFrame, sequence_length: int = None) -> np.ndarray | None:
+        # Componente de preprocessador de dados
+        self.preprocessor: DataPreprocessor = DataPreprocessor(
+            feature_columns=FEATURE_COLUMNS,
+            outlier_method='iqr',
+            scaling_method='robust'
+        )
+
+        # Define o tamanho padrao da sequência
+        self.default_sequence_length = 24
+
+    def prepare_sequence(self, df: pd.DataFrame) -> np.ndarray | None:
         """
-        Prepara uma sequência para previsão com modelo LSTM.
+        Prepara uma sequência para previsão.
 
         Args:
             df: DataFrame com dados históricos
-            sequence_length: Tamanho da sequência (opcional, usa o padrão da classe se não especificado)
 
         Returns:
             np.ndarray: Sequência formatada ou None se houver erro
         """
         try:
-            seq_len = sequence_length or self.sequence_length
-
             # Verificar se temos dados suficientes
-            if len(df) < seq_len:
+            if len(df) < self.default_sequence_length:
                 return None
 
-            # Inicializar preprocessador se necessário
-            if self.preprocessor is None:
-                self.preprocessor = DataPreprocessor(
-                    feature_columns=FEATURE_COLUMNS,
-                    outlier_method='iqr',
-                    scaling_method='robust'
-                )
-                self.preprocessor.fit(df)
+            self.preprocessor.fit(df)
 
             # Preparar a sequência
             x_pred = self.preprocessor.prepare_sequence_for_prediction(
-                df, sequence_length=seq_len
+                df, sequence_length=self.default_sequence_length
             )
 
             return x_pred

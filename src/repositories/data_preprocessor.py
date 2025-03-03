@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 
 from core.logger import logger
 
@@ -245,10 +245,10 @@ class DataPreprocessor:
 
         Args:
             df: DataFrame com dados históricos
-            sequence_length: Comprimento da sequência para o LSTM
+            sequence_length: Comprimento da sequência
 
         Returns:
-            Sequência formatada para o modelo LSTM
+            Sequência formatada para o modelo
         """
         if len(df) < sequence_length:
             logger.warning(
