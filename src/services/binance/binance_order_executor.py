@@ -5,15 +5,9 @@ from typing import Any, Literal
 
 from core.config import settings
 from core.logger import logger
-from services.base.interfaces import IOrderExecutor
-from services.base.schemas import ExecutedOrder
-from services.base.schemas import (
-    TradingSignal,
-    OrderResult,
-    TPSLResult
-)
+from services.base.interfaces import IOrderCalculator, IOrderExecutor
+from services.base.schemas import ExecutedOrder, OrderResult, TPSLResult, TradingSignal
 from services.binance.binance_client import BinanceClient
-from services.trading_strategy import TradingStrategy
 
 
 class BinanceOrderExecutor(IOrderExecutor):
@@ -27,7 +21,7 @@ class BinanceOrderExecutor(IOrderExecutor):
     def __init__(
             self,
             binance_client: BinanceClient,
-            strategy: TradingStrategy,
+            order_calculator: IOrderCalculator,
             tick_size: float = 0.0,
             step_size: float = 0.0
     ):
@@ -36,12 +30,12 @@ class BinanceOrderExecutor(IOrderExecutor):
 
         Args:
             binance_client: Cliente da Binance para operações na exchange
-            strategy: Estratégia de trading para cálculos de ordens
+            order_calculator: Calculador para parâmetros de ordem
             tick_size: Tamanho do tick para o par de trading
             step_size: Tamanho do step para o par de trading
         """
         self.client = binance_client
-        self.strategy = strategy
+        self.order_calculator = order_calculator
         self.tick_size = tick_size
         self.step_size = step_size
 
@@ -140,31 +134,31 @@ class BinanceOrderExecutor(IOrderExecutor):
         position_side = direction
         if direction == "LONG":
             # Ajuste de TP
-            tp_price_adj = self.strategy.adjust_price_to_tick_size(tp_price, self.tick_size)
+            tp_price_adj = self.order_calculator.adjust_price_to_tick_size(tp_price, self.tick_size)
             if tp_price_adj <= current_price:
                 tp_price_adj = current_price + (self.tick_size * 10)
-            tp_str = self.strategy.format_price_for_tick_size(tp_price_adj, self.tick_size)
+            tp_str = self.order_calculator.format_price_for_tick_size(tp_price_adj, self.tick_size)
 
             # Ajuste de SL
-            sl_price_adj = self.strategy.adjust_price_to_tick_size(sl_price, self.tick_size)
+            sl_price_adj = self.order_calculator.adjust_price_to_tick_size(sl_price, self.tick_size)
             if sl_price_adj >= current_price:
                 sl_price_adj = current_price - (self.tick_size * 10)
-            sl_str = self.strategy.format_price_for_tick_size(sl_price_adj, self.tick_size)
+            sl_str = self.order_calculator.format_price_for_tick_size(sl_price_adj, self.tick_size)
 
             side_for_tp_sl: Literal["SELL", "BUY"] = "SELL"
         else:  # SHORT
             position_side = "SHORT"
             # Ajuste de TP
-            tp_price_adj = self.strategy.adjust_price_to_tick_size(tp_price, self.tick_size)
+            tp_price_adj = self.order_calculator.adjust_price_to_tick_size(tp_price, self.tick_size)
             if tp_price_adj >= current_price:
                 tp_price_adj = current_price - (self.tick_size * 10)
-            tp_str = self.strategy.format_price_for_tick_size(tp_price_adj, self.tick_size)
+            tp_str = self.order_calculator.format_price_for_tick_size(tp_price_adj, self.tick_size)
 
             # Ajuste de SL
-            sl_price_adj = self.strategy.adjust_price_to_tick_size(sl_price, self.tick_size)
+            sl_price_adj = self.order_calculator.adjust_price_to_tick_size(sl_price, self.tick_size)
             if sl_price_adj <= current_price:
                 sl_price_adj = current_price + (self.tick_size * 10)
-            sl_str = self.strategy.format_price_for_tick_size(sl_price_adj, self.tick_size)
+            sl_str = self.order_calculator.format_price_for_tick_size(sl_price_adj, self.tick_size)
 
             side_for_tp_sl: Literal["SELL", "BUY"] = "BUY"
 
@@ -195,7 +189,7 @@ class BinanceOrderExecutor(IOrderExecutor):
             min_notional = 100.0  # Mínimo exigido pela Binance
 
             # Calcula quantidade
-            qty = self.strategy.calculate_trade_quantity(
+            qty = self.order_calculator.calculate_trade_quantity(
                 capital=settings.CAPITAL,
                 current_price=signal.current_price,
                 leverage=settings.LEVERAGE,
@@ -205,7 +199,7 @@ class BinanceOrderExecutor(IOrderExecutor):
             )
 
             # Ajusta quantidade
-            qty_adj = self.strategy.adjust_quantity_to_step_size(qty, self.step_size)
+            qty_adj = self.order_calculator.adjust_quantity_to_step_size(qty, self.step_size)
             if qty_adj <= 0:
                 logger.warning("Qty ajustada <= 0. Trade abortado.")
                 return OrderResult(success=False, error_message="Quantidade ajustada <= 0")
