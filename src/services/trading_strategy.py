@@ -4,7 +4,6 @@ import math
 
 from core.config import settings
 from core.logger import logger
-from services.risk_reward_manager import RiskRewardManager
 
 
 class TradingStrategy:
@@ -13,14 +12,6 @@ class TradingStrategy:
     bem como pelo cálculo de quantidade e ajuste de preços.
     """
 
-    def __init__(self):
-        """
-        Inicializa a estratégia de trading com um gerenciador de risk/reward.
-        """
-        self.risk_reward_manager = RiskRewardManager(
-            min_rr_ratio=settings.MIN_RR_RATIO,
-            atr_multiplier=settings.ATR_MULTIPLIER
-        )
 
     def decide_direction(self, predicted_tp_pct: float, predicted_sl_pct: float,
                          threshold: float = 0.2) -> str | None:
@@ -50,11 +41,6 @@ class TradingStrategy:
             return None
 
         rr_ratio = abs(predicted_tp_pct / predicted_sl_pct)
-
-        # Verificar se a razão RR é boa o suficiente
-        if rr_ratio < self.risk_reward_manager.min_rr_ratio:
-            logger.info(f"Razão R:R insuficiente: {rr_ratio:.2f} < {self.risk_reward_manager.min_rr_ratio}")
-            return None
 
         # Decisão de direção baseada no TP previsto
         if predicted_tp_pct > threshold:
