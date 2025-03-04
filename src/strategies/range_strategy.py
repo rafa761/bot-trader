@@ -39,6 +39,7 @@ class RangeStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar informações do range atual
         self.range_high = None

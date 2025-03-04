@@ -40,6 +40,7 @@ class HighVolatilityStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
@@ -1177,6 +1178,7 @@ class LowVolatilityStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
