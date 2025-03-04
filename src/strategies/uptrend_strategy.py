@@ -338,12 +338,12 @@ class UptrendStrategy(BaseStrategy):
                         # Força baseada na diferença dos MACD
                         diff = macd_values[valley2_idx] - macd_values[valley1_idx]
                         divergence_strength = min(diff / 0.0005, 1.0)
-                logger.info(
-                    f"Divergência MACD detectada: "
-                    f"Preço {lows[valley1_idx]:.2f}->{lows[valley2_idx]:.2f}, "
-                    f"MACD hist {macd_values[valley1_idx]:.6f}->{macd_values[valley2_idx]:.6f} "
-                    f"(força: {divergence_strength:.1f})"
-                )
+                        logger.info(
+                            f"Divergência MACD detectada: "
+                            f"Preço {lows[valley1_idx]:.2f}->{lows[valley2_idx]:.2f}, "
+                            f"MACD hist {macd_values[valley1_idx]:.6f}->{macd_values[valley2_idx]:.6f} "
+                            f"(força: {divergence_strength:.1f})"
+                        )
 
         return divergence_detected, divergence_strength
 
