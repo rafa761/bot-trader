@@ -8,6 +8,8 @@ import pandas as pd
 
 from core.logger import logger
 from services.base.schemas import TradingSignal
+from services.prediction.interfaces import ITpSlPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
