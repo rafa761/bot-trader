@@ -790,13 +790,11 @@ class RangeStrategy(BaseStrategy):
         # Em mercados laterais, é recomendável ter 2 níveis de TP
         tp_levels = []
 
-        # Primeira parte = 2/3 do movimento (saída antecipada próximo ao extremo)
-        first_tp_pct = predicted_tp_pct * 0.67
-        # Segunda parte = movimento completo
-        second_tp_pct = predicted_tp_pct
-
-        tp_levels = [first_tp_pct, second_tp_pct]
-        tp_percents = [60, 40]  # 60% na primeira saída, 40% na segunda
+        first_tp_pct = predicted_tp_pct * 0.40  # 40% do caminho
+        second_tp_pct = predicted_tp_pct * 0.70  # 70% do caminho
+        third_tp_pct = predicted_tp_pct  # 100% do caminho
+        tp_levels = [first_tp_pct, second_tp_pct, third_tp_pct]
+        tp_percents = [50, 30, 20]
 
         # Configurar side e position_side para a Binance
         if signal_direction == "LONG":

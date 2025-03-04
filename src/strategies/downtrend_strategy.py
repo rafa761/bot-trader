@@ -24,7 +24,7 @@ class DowntrendStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Downtrend Strategy",
             description="Estratégia otimizada para mercados em tendência de baixa",
-            min_rr_ratio=1.8,  # Exigir R:R maior em tendência de baixa
+            min_rr_ratio=1.5,  # Exigir R:R maior em tendência de baixa
             entry_threshold=0.58,  # Menos rigoroso na entrada por estar a favor da tendência
             tp_adjustment=1.2,  # Aumentar TP para capturar mais do movimento
             sl_adjustment=0.75,  # Stops mais apertados por estar a favor da tendência

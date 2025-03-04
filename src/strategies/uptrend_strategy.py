@@ -28,7 +28,7 @@ class UptrendStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Uptrend Strategy",
             description="Estratégia otimizada para mercados em tendência de alta",
-            min_rr_ratio=1.8,  # Exigir R:R maior em tendência de alta
+            min_rr_ratio=1.5,  # Exigir R:R maior em tendência de alta
             entry_threshold=0.58,  # Menos rigoroso na entrada por estar a favor da tendência
             tp_adjustment=1.2,  # Aumentar TP para capturar mais do movimento
             sl_adjustment=0.75,  # Stops mais apertados por estar a favor da tendência
@@ -500,19 +500,14 @@ class UptrendStrategy(BaseStrategy):
 
             predicted_tp_pct, predicted_sl_pct = prediction
 
-            # TP em múltiplos níveis para gerenciamento de risco aprimorado
-            # Em tendência de alta forte, usar 3 níveis de TP
+            # TP em múltiplos níveis para trade em tendência
             tp_levels = []
 
-            # Primeira parte = 1/3 do movimento
-            first_tp_pct = predicted_tp_pct * 0.33
-            # Segunda parte = 2/3 do movimento
-            second_tp_pct = predicted_tp_pct * 0.66
-            # Terceira parte = movimento completo
-            third_tp_pct = predicted_tp_pct
-
+            first_tp_pct = predicted_tp_pct * 0.25  # 25% do caminho
+            second_tp_pct = predicted_tp_pct * 0.50  # 50% do caminho
+            third_tp_pct = predicted_tp_pct  # 100% do caminho
             tp_levels = [first_tp_pct, second_tp_pct, third_tp_pct]
-            tp_percents = [33, 33, 34]  # Porcentagem da posição para cada nível
+            tp_percents = [40, 40, 20]
 
             # Avaliar a qualidade da entrada com base no cenário atual
             should_enter, entry_score = self.evaluate_entry_quality(

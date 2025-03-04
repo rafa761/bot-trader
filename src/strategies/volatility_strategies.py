@@ -28,7 +28,7 @@ class HighVolatilityStrategy(BaseStrategy):
         config = StrategyConfig(
             name="High Volatility Strategy",
             description="Estratégia otimizada para mercados com alta volatilidade",
-            min_rr_ratio=2.0,  # Exigir R:R maior em mercado volátil
+            min_rr_ratio=1.7,  # Exigir R:R maior em mercado volátil
             entry_threshold=0.70,  # Mais rigoroso na entrada
             tp_adjustment=1.5,  # Aumentar TP para capturar movimentos maiores
             sl_adjustment=1.3,  # SL mais largo para evitar stops prematuros
@@ -812,25 +812,12 @@ class HighVolatilityStrategy(BaseStrategy):
         # TP em múltiplos níveis para mercados voláteis (distribução 30%, 30%, 40%)
         tp_levels = []
 
-        if signal_direction == "LONG":
-            # Primeira parte: 30% na metade do TP
-            first_tp_pct = predicted_tp_pct * 0.4
-            # Segunda parte: 30% em 70% do TP
-            second_tp_pct = predicted_tp_pct * 0.7
-            # Terceira parte: 40% no TP completo
-            third_tp_pct = predicted_tp_pct
-
-            tp_levels = [first_tp_pct, second_tp_pct, third_tp_pct]
-            tp_percents = [30, 30, 40]
-
-        else:  # SHORT
-            # Para shorts, os níveis de TP são negativos
-            first_tp_pct = predicted_tp_pct * 0.4
-            second_tp_pct = predicted_tp_pct * 0.7
-            third_tp_pct = predicted_tp_pct
-
-            tp_levels = [first_tp_pct, second_tp_pct, third_tp_pct]
-            tp_percents = [30, 30, 40]
+        first_tp_pct = predicted_tp_pct * 0.25  # 25% do caminho
+        second_tp_pct = predicted_tp_pct * 0.50  # 50% do caminho
+        third_tp_pct = predicted_tp_pct * 0.75  # 75% do caminho
+        fourth_tp_pct = predicted_tp_pct  # 100% do caminho
+        tp_levels = [first_tp_pct, second_tp_pct, third_tp_pct, fourth_tp_pct]
+        tp_percents = [30, 30, 30, 10]  # Saída progressiva com menor exposição ao final
 
         # Configurar parâmetros para o sinal
         if signal_direction == "LONG":
@@ -1484,7 +1471,7 @@ class LowVolatilityStrategy(BaseStrategy):
         Returns:
             tuple: (breakout_detectado, força_do_breakout de 0 a 1, direção do breakout)
         """
-        if len(df) < 20:  # Precisamos de histórico suficiente
+        if len(df) < 12:  # Precisamos de histórico suficiente
             return False, 0.0, "NONE"
 
         squeeze_breakout = False
@@ -1500,11 +1487,11 @@ class LowVolatilityStrategy(BaseStrategy):
             compression_period = False
             if len(df) > 10:
                 # Calcular média e desvio padrão das últimas 10 barras
-                avg_width = df['boll_width'].iloc[-10:].mean()
-                std_width = df['boll_width'].iloc[-10:].std()
+                avg_width = df['boll_width'].iloc[-8:].mean()
+                std_width = df['boll_width'].iloc[-8:].std()
 
                 # Verificar se houve compressão significativa seguida de expansão
-                min_width = df['boll_width'].iloc[-10:].min()
+                min_width = df['boll_width'].iloc[-8:].min()
 
                 # Compressão = pelo menos 1 barra com largura < (média - 1 desvio padrão)
                 compression_threshold = avg_width - std_width
@@ -1741,22 +1728,10 @@ class LowVolatilityStrategy(BaseStrategy):
         # Em baixa vol, é melhor ter 2 níveis com saída maior no primeiro TP
         tp_levels = []
 
-        if signal_direction == "LONG":
-            # Primeira parte: 60% a 60% do caminho
-            first_tp_pct = predicted_tp_pct * 0.6
-            # Segunda parte: 40% no TP completo
-            second_tp_pct = predicted_tp_pct
-
-            tp_levels = [first_tp_pct, second_tp_pct]
-            tp_percents = [60, 40]
-
-        else:  # SHORT
-            # Para shorts, os níveis de TP são negativos
-            first_tp_pct = predicted_tp_pct * 0.6
-            second_tp_pct = predicted_tp_pct
-
-            tp_levels = [first_tp_pct, second_tp_pct]
-            tp_percents = [60, 40]
+        first_tp_pct = predicted_tp_pct * 0.50  # 50% do caminho
+        second_tp_pct = predicted_tp_pct  # 100% do caminho
+        tp_levels = [first_tp_pct, second_tp_pct]
+        tp_percents = [70, 30]  # Saída ainda mais agressiva no início para volatilidade baixa
 
         # Configurar parâmetros para o sinal
         if signal_direction == "LONG":
