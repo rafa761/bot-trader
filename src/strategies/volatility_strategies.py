@@ -9,6 +9,8 @@ import pandas as pd
 from core.config import settings
 from core.logger import logger
 from services.base.schemas import TradingSignal
+from services.prediction.interfaces import ITpSlPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -40,6 +42,7 @@ class HighVolatilityStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
@@ -351,7 +354,7 @@ class HighVolatilityStrategy(BaseStrategy):
             # ADX > 25 indica tendência
             if adx > 25:
                 # Normalizar força do ADX (25-50 -> 0-1)
-                adx_signal = min((adx - 25) / 25, 1.0)
+                adx_strength = min((adx - 25) / 25, 1.0)
 
                 # Direcional Indexes determinam a direção
                 if di_plus > di_minus:
@@ -359,7 +362,7 @@ class HighVolatilityStrategy(BaseStrategy):
                     # A diferença entre +DI e -DI indica a força
                     di_diff = (di_plus - di_minus) / 100
                     # Combinar ADX e DI para uma melhor pontuação
-                    momentum_strength = adx_signal * 0.7 + di_diff * 0.3
+                    momentum_strength = adx_strength * 0.7 + di_diff * 0.3
 
                     logger.info(
                         f"Momentum de alta detectado: ADX={adx:.1f}, +DI={di_plus:.1f}, -DI={di_minus:.1f} "
@@ -1177,6 +1180,7 @@ class LowVolatilityStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
@@ -2030,7 +2034,7 @@ class LowVolatilityStrategy(BaseStrategy):
             signal.mtf_details['low_volatility_adjustments'] = {
                 'trailing_stop': False,  # Sem trailing stop em baixa volatilidade
                 'quick_exit': True,  # Saída rápida se a oportunidade diminui
-                'position_size_boost': 1.2  # Tamanho da posição 20% maior que normal
+                'position_size_boost': 1.3  # Tamanho da posição 30% maior que normal
             }
 
             # Dados de volatilidade para referência
@@ -2038,8 +2042,9 @@ class LowVolatilityStrategy(BaseStrategy):
                 signal.mtf_details['volatility_atr_pct'] = atr_pct
 
             # Instruções específicas para trades de baixa volatilidade
-            signal.mtf_details[
-                'low_volatility_instructions'] = "Use posição maior. TP mais conservador. Sem trailing stop."
+            signal.mtf_details['low_volatility_instructions'] = ("Use posição 30% maior. "
+                                                                 "TP mais conservador. "
+                                                                 "Sem trailing stop.")
 
         logger.info(
             f"Sinal ajustado para baixa volatilidade: "

@@ -8,6 +8,8 @@ import pandas as pd
 
 from core.logger import logger
 from services.base.schemas import TradingSignal
+from services.prediction.interfaces import ITpSlPredictionService
+from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
 
 
@@ -39,6 +41,7 @@ class RangeStrategy(BaseStrategy):
             ]
         )
         super().__init__(config)
+        self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
         # Armazenar informações do range atual
         self.range_high = None
@@ -95,6 +98,7 @@ class RangeStrategy(BaseStrategy):
 
         # Verificar se o preço está contido em um canal horizontal
         price_channel = False
+        range_pct = 0.0
         if len(df) > 20:
             # Calcular range dos últimos 20 períodos
             high_range = df['high'].iloc[-20:].max() - df['high'].iloc[-20:].min()
@@ -120,6 +124,7 @@ class RangeStrategy(BaseStrategy):
 
         # Verificar largura do Bollinger Band (estreita em consolidação)
         bb_narrow = False
+        bb_width = 0.0
         if 'boll_width' in df.columns:
             bb_width = df['boll_width'].iloc[-1]
             avg_width = df['boll_width'].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0.02
