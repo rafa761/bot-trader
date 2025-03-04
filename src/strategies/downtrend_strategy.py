@@ -24,13 +24,13 @@ class DowntrendStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Downtrend Strategy",
             description="Estratégia otimizada para mercados em tendência de baixa",
-            min_rr_ratio=1.5,  # Exigir R:R maior em tendência de baixa
-            entry_threshold=0.58,  # Menos rigoroso na entrada por estar a favor da tendência
-            tp_adjustment=1.2,  # Aumentar TP para capturar mais do movimento
-            sl_adjustment=0.75,  # Stops mais apertados por estar a favor da tendência
-            entry_aggressiveness=1.2,  # Mais agressivo nas entradas
+            min_rr_ratio=1.2,
+            entry_threshold=0.45,
+            tp_adjustment=1.1,
+            sl_adjustment=0.85,
+            entry_aggressiveness=1.3,
             max_sl_percent=1.8,
-            min_tp_percent=0.7,
+            min_tp_percent=0.5,
             required_indicators=[
                 "ema_short", "ema_long", "adx", "rsi",
                 "stoch_k", "stoch_d", "atr", "vwap",
@@ -500,7 +500,7 @@ class DowntrendStrategy(BaseStrategy):
             )
 
             # Adicionar o score de confluência de condições
-            entry_score = 0.7 * entry_score + 0.3 * entry_conditions_score
+            entry_score = 0.5 * entry_score + 0.5 * entry_conditions_score
 
             if not should_enter:
                 logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
@@ -608,10 +608,10 @@ class DowntrendStrategy(BaseStrategy):
         # Verificar RSI se disponível
         if 'rsi' in df.columns:
             rsi = df['rsi'].iloc[-1]
-            if trade_direction == "SHORT" and rsi > 60:
+            if trade_direction == "SHORT" and rsi > 55:
                 # Bônus para trades SHORT quando RSI está alto (sobrecompra)
-                entry_score = min(1.0, entry_score * 1.1)
-            elif trade_direction == "SHORT" and rsi < 40:
+                entry_score = min(1.0, entry_score * 1.2)
+            elif trade_direction == "SHORT" and rsi < 30:
                 # Penalidade para trades SHORT quando RSI está baixo (sobrevenda)
                 entry_score = entry_score * 0.8
 

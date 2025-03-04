@@ -173,7 +173,7 @@ class DataPreprocessor:
                             (df_processed[col] > upper_bound))
 
                 if outliers.sum() > 0:
-                    logger.info(f"Detectados {outliers.sum()} outliers na coluna {col}")
+                    # logger.info(f"Detectados {outliers.sum()} outliers na coluna {col}")
 
                     # Substituir outliers pela mediana
                     df_processed.loc[outliers, col] = self.original_stats[col]['median']

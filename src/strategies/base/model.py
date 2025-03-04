@@ -142,22 +142,18 @@ class BaseStrategy(IMarketStrategy):
 
     @staticmethod
     def calculate_trend_direction(df: pd.DataFrame) -> str:
-        """
-        Calcula a direção atual da tendência com base nas médias móveis.
-
-        Args:
-            df: DataFrame com os dados históricos
-
-        Returns:
-            str: "UPTREND", "DOWNTREND" ou "NEUTRAL"
-        """
         if 'ema_short' in df.columns and 'ema_long' in df.columns:
-            ema_short = df['ema_short'].iloc[-1]
-            ema_long = df['ema_long'].iloc[-1]
+            # Usar apenas as últimas 5 barras para determinar tendência
+            ema_short_recent = df['ema_short'].iloc[-5:]
+            ema_long_recent = df['ema_long'].iloc[-5:]
 
-            if ema_short > ema_long:
+            # Se a maior parte das barras recentes mostra uma tendência
+            up_count = sum(ema_short_recent > ema_long_recent)
+            down_count = sum(ema_short_recent < ema_long_recent)
+
+            if up_count >= 3:  # Maioria das barras recentes em uptrend
                 return "UPTREND"
-            elif ema_short < ema_long:
+            elif down_count >= 3:  # Maioria das barras recentes em downtrend
                 return "DOWNTREND"
 
         return "NEUTRAL"

@@ -27,13 +27,13 @@ class RangeStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Range Strategy",
             description="Estratégia otimizada para mercados laterais (em range)",
-            min_rr_ratio=1.3,  # R:R menor em mercado de range
-            entry_threshold=0.65,  # Mais rigoroso na entrada em range
-            tp_adjustment=0.8,  # TP menor pois os movimentos são limitados
-            sl_adjustment=0.9,  # SL ligeiramente mais apertado
-            entry_aggressiveness=0.8,  # Menos agressivo nas entradas
-            max_sl_percent=1.2,
-            min_tp_percent=0.4,
+            min_rr_ratio=1.1,
+            entry_threshold=0.50,
+            tp_adjustment=0.85,
+            sl_adjustment=0.8,
+            entry_aggressiveness=1.0,
+            max_sl_percent=1.0,
+            min_tp_percent=0.3,
             required_indicators=[
                 "adx", "boll_width", "rsi", "boll_lband", "boll_hband",
                 "boll_pct_b", "stoch_k", "stoch_d", "atr", "ema_short",

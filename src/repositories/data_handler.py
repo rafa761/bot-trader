@@ -11,10 +11,10 @@ import pandas as pd
 from binance import Client
 from binance.exceptions import BinanceAPIException
 from pydantic import BaseModel, Field
-from ta.momentum import ROCIndicator, RSIIndicator, StochasticOscillator, StochRSIIndicator
-from ta.trend import EMAIndicator, WMAIndicator, PSARIndicator, MACD, ADXIndicator, SMAIndicator
+from ta.momentum import ROCIndicator, RSIIndicator, StochRSIIndicator, StochasticOscillator
+from ta.trend import ADXIndicator, EMAIndicator, MACD, PSARIndicator, SMAIndicator, WMAIndicator
 from ta.volatility import AverageTrueRange, BollingerBands
-from ta.volume import OnBalanceVolumeIndicator, ChaikinMoneyFlowIndicator, VolumeWeightedAveragePrice
+from ta.volume import ChaikinMoneyFlowIndicator, OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 
 from core.config import settings
 from core.constants import TRAIN_DATA_DIR
@@ -271,10 +271,10 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    ema_windows: tuple[int, int] = (5, 15)  # Mais curtas para maior sensibilidade
+    ema_windows: tuple[int, int] = (3, 10)  # Mais curtas para maior sensibilidade
 
     # Hull Moving Average - excelente para day trading
-    hull_window: int = 9  # Reduzido para maior reatividade
+    hull_window: int = 7  # Reduzido para maior reatividade
 
     # Indicadores de volatilidade otimizados
     bollinger_window: int = 14  # Reduzido para maior sensibilidade
@@ -282,13 +282,13 @@ class TechnicalIndicatorConfig(BaseModel):
     atr_window: int = 10  # Reduzido para maior sensibilidade
 
     # Osciladores otimizados para day trading
-    rsi_window: int = 7  # Reduzido para maior sensibilidade
+    rsi_window: int = 5  # Reduzido para maior sensibilidade
     stoch_k_window: int = 7  # Reduzido para maior sensibilidade
     stoch_d_window: int = 3  # Mantido
     stoch_smooth_k: int = 2  # Menos suavização para maior reatividade
 
     # MACD otimizado para 15min
-    macd_windows: tuple[int, int, int] = (15, 7, 9)  # Ajustado para maior sensibilidade
+    macd_windows: tuple[int, int, int] = (12, 5, 7)  # Ajustado para maior sensibilidade
 
     # Outros indicadores otimizados
     vwap_window: int = 14  # Mantido

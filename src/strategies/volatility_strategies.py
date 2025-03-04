@@ -28,13 +28,13 @@ class HighVolatilityStrategy(BaseStrategy):
         config = StrategyConfig(
             name="High Volatility Strategy",
             description="Estratégia otimizada para mercados com alta volatilidade",
-            min_rr_ratio=1.7,  # Exigir R:R maior em mercado volátil
-            entry_threshold=0.70,  # Mais rigoroso na entrada
-            tp_adjustment=1.5,  # Aumentar TP para capturar movimentos maiores
-            sl_adjustment=1.3,  # SL mais largo para evitar stops prematuros
-            entry_aggressiveness=0.7,  # Menos agressivo nas entradas
-            max_sl_percent=2.5,  # Permitir SL maior em mercado volátil
-            min_tp_percent=1.0,  # Exigir TP maior
+            min_rr_ratio=1.4,
+            entry_threshold=0.55,
+            tp_adjustment=1.3,
+            sl_adjustment=1.4,
+            entry_aggressiveness=0.9,
+            max_sl_percent=2.5,
+            min_tp_percent=1.0,
             required_indicators=[
                 "adx", "atr", "atr_pct", "boll_width", "boll_hband", "boll_lband",
                 "rsi", "stoch_k", "stoch_d", "macd", "macd_histogram", "volume",
@@ -803,7 +803,7 @@ class HighVolatilityStrategy(BaseStrategy):
         )
 
         # Combinar o score de condições com o score de qualidade da entrada
-        entry_score = 0.7 * entry_score + 0.3 * signal_strength
+        entry_score = 0.5 * entry_score + 0.5 * signal_strength
 
         if not should_enter:
             logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
@@ -1153,13 +1153,13 @@ class LowVolatilityStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Low Volatility Strategy",
             description="Estratégia otimizada para mercados com baixa volatilidade",
-            min_rr_ratio=1.3,  # R:R menor em mercados calmos
-            entry_threshold=0.65,  # Moderadamente rigoroso na entrada
-            tp_adjustment=0.7,  # Reduzir TP para targets mais realistas
-            sl_adjustment=0.6,  # Reduzir SL para compensar o TP menor
-            entry_aggressiveness=1.1,  # Um pouco mais agressivo nas entradas
-            max_sl_percent=0.8,
-            min_tp_percent=0.3,
+            min_rr_ratio=1.1,
+            entry_threshold=0.50,
+            tp_adjustment=0.8,
+            sl_adjustment=0.7,
+            entry_aggressiveness=1.2,
+            max_sl_percent=0.7,
+            min_tp_percent=0.25,
             required_indicators=[
                 "adx", "atr", "atr_pct", "boll_width", "boll_hband", "boll_lband",
                 "boll_pct_b", "rsi", "stoch_k", "stoch_d", "macd", "macd_histogram",
@@ -1718,7 +1718,7 @@ class LowVolatilityStrategy(BaseStrategy):
         )
 
         # Combinar o score de condições com o score de qualidade da entrada
-        entry_score = 0.7 * entry_score + 0.3 * signal_strength
+        entry_score = 0.5 * entry_score + 0.5 * signal_strength
 
         if not should_enter:
             logger.info(f"Trade rejeitado pela avaliação de qualidade (score: {entry_score:.2f})")
@@ -1844,16 +1844,16 @@ class LowVolatilityStrategy(BaseStrategy):
             pct_b = df['boll_pct_b'].iloc[-1]
 
             # Mean-reversion para LONG quando preço está perto da banda inferior
-            if trade_direction == "LONG" and pct_b < 0.2:
+            if trade_direction == "LONG" and pct_b < 0.3:
                 # Bônus para entradas em extremos
-                reversion_bonus = (0.2 - pct_b) * 4
+                reversion_bonus = (0.2 - pct_b) * 3
                 entry_score = min(1.0, entry_score + reversion_bonus)
                 logger.info(f"Bônus para LONG na banda inferior (%B={pct_b:.2f}): +{reversion_bonus:.2f}")
 
             # Mean-reversion para SHORT quando preço está perto da banda superior
-            elif trade_direction == "SHORT" and pct_b > 0.8:
+            elif trade_direction == "SHORT" and pct_b > 0.7:
                 # Bônus para entradas em extremos
-                reversion_bonus = (pct_b - 0.8) * 4
+                reversion_bonus = (pct_b - 0.7) * 3
                 entry_score = min(1.0, entry_score + reversion_bonus)
                 logger.info(f"Bônus para SHORT na banda superior (%B={pct_b:.2f}): +{reversion_bonus:.2f}")
 
