@@ -1,10 +1,10 @@
 # services/base/schemas.py
 
 from datetime import datetime
-from typing import Literal, Any
+from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 rng = np.random.default_rng(seed=42)
 
@@ -43,6 +43,14 @@ class TradingSignal(BaseModel):
     market_trend: str | None = Field(default=None, description="Tendência do mercado (UPTREND, DOWNTREND, NEUTRAL)")
     market_strength: str | None = Field(default=None, description="Força da tendência (STRONG_TREND, WEAK_TREND)")
     timestamp: datetime = Field(default_factory=datetime.now)
+
+    @field_validator('mtf_alignment', 'mtf_confidence', 'entry_score')
+    @classmethod
+    def limit_score_to_range(cls, value: float | None):
+        """ Limita a os campos a no máximo 1.0 """
+        if value is not None and isinstance(value, (int, float, np.number)):
+            return min(max(float(value), 0.0), 1.0)
+        return value
 
 
 class OrderResult(BaseModel):
