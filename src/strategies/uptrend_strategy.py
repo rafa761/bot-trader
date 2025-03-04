@@ -38,7 +38,8 @@ class UptrendStrategy(BaseStrategy):
             required_indicators=[
                 "ema_short", "ema_long", "adx", "rsi",
                 "stoch_k", "stoch_d", "atr", "vwap",
-                "volume", "macd", "macd_histogram"
+                "volume", "macd", "macd_signal",
+                "macd_histogram",
             ]
         )
         super().__init__(config)
