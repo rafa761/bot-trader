@@ -2,7 +2,7 @@
 
 import asyncio
 import math
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
 from binance import AsyncClient
 from binance.exceptions import BinanceAPIException
@@ -32,10 +32,19 @@ class BinanceClient:
         """
         if not self.is_client_initialized():
             logger.info("Iniciando client assíncrono da Binance...")
+
+            is_development = settings.BINANCE_ENVIRONMENT == "development"
+            binance_api_key = settings.BINANCE_API_KEY_TESTNET
+            binance_api_secret = settings.BINANCE_API_SECRET_TESTNET
+            if not is_development:
+                logger.info("CUIDADO - Usando ambiente de produção da Binance")
+                binance_api_key = settings.BINANCE_API_KEY
+                binance_api_secret = settings.BINANCE_API_SECRET
+
             self.client = await AsyncClient.create(
-                api_key=settings.BINANCE_API_KEY_TESTNET,
-                api_secret=settings.BINANCE_API_SECRET_TESTNET,
-                testnet=True
+                api_key=binance_api_key,
+                api_secret=binance_api_secret,
+                testnet=is_development
             )
             logger.info("Client assíncrono da Binance iniciado")
 
