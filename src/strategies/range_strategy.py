@@ -11,6 +11,8 @@ from services.base.schemas import TradingSignal
 from services.prediction.interfaces import ITpSlPredictionService
 from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
+from strategies.patterns.entry_evaluator import EntryEvaluatorFactory
+from strategies.patterns.pattern_analyzer import PatternAnalyzerFactory
 
 
 class RangeStrategy(BaseStrategy):
@@ -42,6 +44,14 @@ class RangeStrategy(BaseStrategy):
         )
         super().__init__(config)
         self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
+
+        # Inicializar analisadores de padrões
+        pattern_factory = PatternAnalyzerFactory()
+        self.momentum_analyzer = pattern_factory.create_momentum_analyzer()
+        self.volatility_analyzer = pattern_factory.create_volatility_analyzer()
+
+        # Inicializar avaliador de entradas
+        self.entry_evaluator = EntryEvaluatorFactory.create_evaluator("RANGE", config)
 
         # Armazenar informações do range atual
         self.range_high = None
@@ -423,218 +433,7 @@ class RangeStrategy(BaseStrategy):
 
         return rejection_detected, rejection_strength
 
-    def _check_overbought_oversold(self, df: pd.DataFrame) -> tuple[bool, bool, float]:
-        """
-        Verifica se o mercado está em condição de sobrecompra ou sobrevenda
-        usando múltiplos osciladores.
 
-        Returns:
-            tuple: (em_sobrecompra, em_sobrevenda, força_do_sinal)
-        """
-        overbought = False
-        oversold = False
-        signal_strength = 0.0
-        signals = []
-
-        # 1. Verificar RSI
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-            rsi_prev = df['rsi'].iloc[-2] if len(df) > 2 else 50
-
-            # Sobrecompra e sobrevenda no RSI + direção de mudança
-            if rsi > 70:
-                overbought_strength = min((rsi - 70) / 30, 1.0)
-                # Maior força se o RSI está começando a cair (possível reversão)
-                if rsi < rsi_prev:
-                    overbought_strength *= 1.2
-
-                signals.append(('overbought', overbought_strength))
-                logger.info(f"RSI em sobrecompra: {rsi:.1f} (força: {overbought_strength:.2f})")
-
-            elif rsi < 30:
-                oversold_strength = min((30 - rsi) / 30, 1.0)
-                # Maior força se o RSI está começando a subir (possível reversão)
-                if rsi > rsi_prev:
-                    oversold_strength *= 1.2
-
-                signals.append(('oversold', oversold_strength))
-                logger.info(f"RSI em sobrevenda: {rsi:.1f} (força: {oversold_strength:.2f})")
-
-        # 2. Verificar Stochastic
-        if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
-            stoch_k = df['stoch_k'].iloc[-1]
-            stoch_d = df['stoch_d'].iloc[-1]
-            stoch_k_prev = df['stoch_k'].iloc[-2] if len(df) > 2 else 50
-
-            # Sobrecompra e sobrevenda no Stochastic + direção de mudança
-            if stoch_k > 80 and stoch_d > 80:
-                overbought_strength = min((stoch_k - 80) / 20, 1.0) * 0.8  # Peso menor que RSI
-                # Maior força se o Stoch está começando a cair (possível reversão)
-                if stoch_k < stoch_k_prev:
-                    overbought_strength *= 1.2
-
-                signals.append(('overbought', overbought_strength))
-                logger.info(
-                    f"Stochastic em sobrecompra: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {overbought_strength:.2f})"
-                )
-
-            elif stoch_k < 20 and stoch_d < 20:
-                oversold_strength = min((20 - stoch_k) / 20, 1.0) * 0.8  # Peso menor que RSI
-                # Maior força se o Stoch está começando a subir (possível reversão)
-                if stoch_k > stoch_k_prev:
-                    oversold_strength *= 1.2
-
-                signals.append(('oversold', oversold_strength))
-                logger.info(
-                    f"Stochastic em sobrevenda: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {oversold_strength:.2f})"
-                )
-
-        # 3. Verificar Bollinger %B
-        if 'boll_pct_b' in df.columns:
-            pct_b = df['boll_pct_b'].iloc[-1]
-            pct_b_prev = df['boll_pct_b'].iloc[-2] if len(df) > 2 else 0.5
-
-            # %B próximo de 1 = sobrecompra, %B próximo de 0 = sobrevenda
-            if pct_b > 0.95:
-                overbought_strength = min((pct_b - 0.95) * 20, 1.0) * 0.7  # Peso menor ainda
-                # Maior força se %B está começando a cair (possível reversão)
-                if pct_b < pct_b_prev:
-                    overbought_strength *= 1.2
-
-                signals.append(('overbought', overbought_strength))
-                logger.info(f"Bollinger %B em sobrecompra: {pct_b:.2f} (força: {overbought_strength:.2f})")
-
-            elif pct_b < 0.05:
-                oversold_strength = min((0.05 - pct_b) * 20, 1.0) * 0.7  # Peso menor ainda
-                # Maior força se %B está começando a subir (possível reversão)
-                if pct_b > pct_b_prev:
-                    oversold_strength *= 1.2
-
-                signals.append(('oversold', oversold_strength))
-                logger.info(f"Bollinger %B em sobrevenda: {pct_b:.2f} (força: {oversold_strength:.2f})")
-
-        # 4. Verificar MACD histograma para confirmar momentum
-        if 'macd_histogram' in df.columns and len(df) > 2:
-            hist = df['macd_histogram'].iloc[-1]
-            hist_prev = df['macd_histogram'].iloc[-2]
-
-            # Se o histograma está diminuindo numa região positiva = perda de momentum de alta
-            if hist > 0 and hist < hist_prev:
-                overbought_boost = 0.1
-                signals.append(('overbought', overbought_boost))
-                logger.info(f"MACD histograma diminuindo em região positiva: {hist:.6f} < {hist_prev:.6f}")
-
-            # Se o histograma está aumentando numa região negativa = perda de momentum de baixa
-            elif hist < 0 and hist > hist_prev:
-                oversold_boost = 0.1
-                signals.append(('oversold', oversold_boost))
-                logger.info(f"MACD histograma aumentando em região negativa: {hist:.6f} > {hist_prev:.6f}")
-
-        # Processar os sinais acumulados
-        if signals:
-            # Separe os sinais de sobrecompra e sobrevenda
-            overbought_signals = [strength for signal_type, strength in signals if signal_type == 'overbought']
-            oversold_signals = [strength for signal_type, strength in signals if signal_type == 'oversold']
-
-            # Determinar se estamos em sobrecompra ou sobrevenda com base no tipo dominante
-            if overbought_signals and len(overbought_signals) > len(oversold_signals):
-                overbought = True
-                # Use o sinal mais forte como base e adicione pequenos bônus para sinais adicionais
-                signal_strength = max(overbought_signals) + 0.05 * (len(overbought_signals) - 1)
-                signal_strength = min(signal_strength, 1.0)
-
-            elif oversold_signals and len(oversold_signals) > len(overbought_signals):
-                oversold = True
-                # Use o sinal mais forte como base e adicione pequenos bônus para sinais adicionais
-                signal_strength = max(oversold_signals) + 0.05 * (len(oversold_signals) - 1)
-                signal_strength = min(signal_strength, 1.0)
-
-        return overbought, oversold, signal_strength
-
-    def _check_range_compression(self, df: pd.DataFrame) -> tuple[bool, float]:
-        """
-        Verifica se o mercado está em compressão de volatilidade (squeeze),
-        o que pode indicar um movimento explosivo iminente.
-
-        Returns:
-            tuple: (em_compressão, força_da_compressão de 0 a 1)
-        """
-        compression_detected = False
-        compression_strength = 0.0
-
-        if len(df) < 20:  # Precisamos de histórico para detectar compressão
-            return False, 0.0
-
-        # 1. Verificar compressão das Bollinger Bands
-        if 'boll_width' in df.columns:
-            current_width = df['boll_width'].iloc[-1]
-            avg_width = df['boll_width'].iloc[-20:].mean()
-
-            # Bandas mais estreitas que X% da média = compressão
-            width_ratio = current_width / avg_width
-
-            if width_ratio < 0.8:
-                # Quanto menor o width_ratio, maior a compressão
-                bb_compression = min((0.8 - width_ratio) * 5, 1.0)
-                logger.info(f"Compressão nas Bollinger Bands: {width_ratio:.2f} vs média (força: {bb_compression:.2f})")
-
-                # Verificar também se as bandas estão se estreitando ou já expandindo
-                width_direction = 0
-                for i in range(1, min(5, len(df))):
-                    if df['boll_width'].iloc[-i] < df['boll_width'].iloc[-i - 1]:
-                        width_direction -= 1  # Estreitando
-                    else:
-                        width_direction += 1  # Expandindo
-
-                # Se as bandas começaram a expandir após compressão, isso é um sinal de movimento iminente
-                if width_direction > 0:
-                    bb_compression *= 1.2
-                    logger.info(f"Bollinger Bands começando a expandir após compressão")
-
-                compression_detected = True
-                compression_strength = bb_compression
-
-        # 2. Verificar redução do ATR (outra medida de compressão de volatilidade)
-        if 'atr' in df.columns:
-            current_atr = df['atr'].iloc[-1]
-            avg_atr = df['atr'].iloc[-20:].mean()
-
-            # ATR atual menor que X% da média = compressão
-            atr_ratio = current_atr / avg_atr
-
-            if atr_ratio < 0.8:
-                # Quanto menor o atr_ratio, maior a compressão
-                atr_compression = min((0.8 - atr_ratio) * 5, 1.0)
-                logger.info(f"Compressão no ATR: {atr_ratio:.2f} vs média (força: {atr_compression:.2f})")
-
-                if not compression_detected:
-                    compression_detected = True
-                    compression_strength = atr_compression
-                else:
-                    # Se já detectamos compressão nas BBands, combinar os sinais
-                    compression_strength = 0.7 * compression_strength + 0.3 * atr_compression
-
-        # 3. Verificar volume reduzido (comum antes de um movimento explosivo)
-        if 'volume' in df.columns:
-            current_volume = df['volume'].iloc[-3:].mean()  # Média dos últimos 3 períodos
-            avg_volume = df['volume'].iloc[-20:].mean()
-
-            # Volume atual menor que X% da média = possível compressão
-            volume_ratio = current_volume / avg_volume
-
-            if volume_ratio < 0.7:
-                # Quanto menor o volume_ratio, maior a possibilidade de movimento iminente
-                vol_compression = min((0.7 - volume_ratio) * 3, 1.0)
-                logger.info(f"Volume reduzido: {volume_ratio:.2f} vs média (força: {vol_compression:.2f})")
-
-                if not compression_detected:
-                    compression_detected = True
-                    compression_strength = vol_compression * 0.7  # Menor peso para volume sozinho
-                else:
-                    # Se já detectamos compressão, adicionar componente de volume
-                    compression_strength = compression_strength * 0.8 + vol_compression * 0.2
-
-        return compression_detected, min(compression_strength, 1.0)
 
     async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
@@ -666,10 +465,10 @@ class RangeStrategy(BaseStrategy):
         lower_rejection, lower_strength = self._check_lower_extreme_rejection(df, lower_bound)
 
         # 4. Verificar condições de sobrecompra/sobrevenda
-        overbought, oversold, oscillator_strength = self._check_overbought_oversold(df)
+        overbought, oversold, oscillator_strength = self.momentum_analyzer.check_overbought_oversold(df)
 
         # 5. Verificar compressão de volatilidade (squeeze)
-        compression, compression_strength = self._check_range_compression(df)
+        compression, compression_strength = self.volatility_analyzer.detect_range_compression(df)
 
         # 6. Decidir direção do sinal com base nas análises anteriores
         signal_direction = None
@@ -774,7 +573,7 @@ class RangeStrategy(BaseStrategy):
                     predicted_tp_pct = -max_tp_pct
 
         # Avaliar a qualidade da entrada
-        should_enter, final_entry_score = self.evaluate_entry_quality(
+        should_enter, final_entry_score = self.entry_evaluator.evaluate_entry_quality(
             df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct,
             entry_threshold=self.config.entry_threshold
         )
@@ -856,136 +655,6 @@ class RangeStrategy(BaseStrategy):
 
         return signal
 
-    def evaluate_entry_quality(
-            self,
-            df: pd.DataFrame,
-            current_price: float,
-            trade_direction: str,
-            predicted_tp_pct: float = None,
-            predicted_sl_pct: float = None,
-            entry_threshold: float = None,
-            mtf_alignment: float = None
-    ) -> tuple[bool, float]:
-        """
-        Avalia a qualidade da entrada para RangeStrategy.
-
-        Args:
-            df: DataFrame com dados históricos
-            current_price: Preço atual do ativo
-            trade_direction: "LONG" ou "SHORT"
-            predicted_tp_pct: Take profit percentual previsto
-            predicted_sl_pct: Stop loss percentual previsto
-            entry_threshold: Limiar opcional para qualidade de entrada
-            mtf_alignment: Score de alinhamento multi-timeframe (0-1)
-
-        Returns:
-            tuple[bool, float]: (Deve entrar, pontuação da entrada)
-        """
-        # Calcular razão risco-recompensa se tp e sl forem fornecidos
-        if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
-            rr_ratio = abs(predicted_tp_pct) / abs(predicted_sl_pct)
-
-            # Verificar se RR é bom o suficiente
-            should_enter = rr_ratio >= self.config.min_rr_ratio
-
-            # Pontuação básica baseada em R:R
-            entry_score = min(1.0, rr_ratio / 3.0)  # Pontuação de 0 a 1
-        else:
-            # Valores padrão se tp e sl não forem fornecidos
-            should_enter = False
-            entry_score = 0.0
-
-        # Verificar proximidade aos extremos do range
-        if self.range_high is not None and self.range_low is not None:
-            range_mid = (self.range_high + self.range_low) / 2
-
-            # Para LONG, verifique se estamos próximo do suporte (mínimo do range)
-            if trade_direction == "LONG":
-                # Quanto mais próximo do mínimo, melhor
-                distance_to_min = (current_price - self.range_low) / (self.range_high - self.range_low)
-                if distance_to_min < 0.2:  # Nos 20% inferiores do range
-                    range_bonus = (0.2 - distance_to_min) * 1.5
-                    entry_score = min(1.0, entry_score + range_bonus)
-                    logger.info(f"Bônus para LONG próximo ao suporte: {range_bonus:.2f}")
-
-                # Penalidade se estamos acima do meio do range
-                elif current_price > range_mid:
-                    range_penalty = (current_price - range_mid) / (self.range_high - range_mid) * 0.3
-                    entry_score = max(0.0, entry_score - range_penalty)
-                    logger.info(f"Penalidade para LONG acima do meio do range: {range_penalty:.2f}")
-
-            # Para SHORT, verifique se estamos próximo da resistência (máximo do range)
-            elif trade_direction == "SHORT":
-                # Quanto mais próximo do máximo, melhor
-                distance_to_max = (self.range_high - current_price) / (self.range_high - self.range_low)
-                if distance_to_max < 0.2:  # Nos 20% superiores do range
-                    range_bonus = (0.2 - distance_to_max) * 1.5
-                    entry_score = min(1.0, entry_score + range_bonus)
-                    logger.info(f"Bônus para SHORT próximo à resistência: {range_bonus:.2f}")
-
-                # Penalidade se estamos abaixo do meio do range
-                elif current_price < range_mid:
-                    range_penalty = (range_mid - current_price) / (range_mid - self.range_low) * 0.3
-                    entry_score = max(0.0, entry_score - range_penalty)
-                    logger.info(f"Penalidade para SHORT abaixo do meio do range: {range_penalty:.2f}")
-
-        # Verificar osciladores para confirmação
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-            if trade_direction == "LONG" and rsi < 30:
-                # Bônus para LONG em sobrevenda
-                rsi_bonus = min((30 - rsi) / 30, 0.7) * 0.25
-                entry_score = min(1.0, entry_score + rsi_bonus)
-                logger.info(f"Bônus para LONG com RSI em sobrevenda ({rsi:.1f}): {rsi_bonus:.2f}")
-            elif trade_direction == "SHORT" and rsi > 70:
-                # Bônus para SHORT em sobrecompra
-                rsi_bonus = min((rsi - 70) / 30, 0.7) * 0.25
-                entry_score = min(1.0, entry_score + rsi_bonus)
-                logger.info(f"Bônus para SHORT com RSI em sobrecompra ({rsi:.1f}): {rsi_bonus:.2f}")
-
-        # Verificar stochastic
-        if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
-            stoch_k = df['stoch_k'].iloc[-1]
-            stoch_d = df['stoch_d'].iloc[-1]
-            if trade_direction == "LONG" and stoch_k < 20 and stoch_d < 20:
-                # Bônus para LONG com Stoch em sobrevenda
-                stoch_bonus = 0.15
-                entry_score = min(1.0, entry_score + stoch_bonus)
-                logger.info(f"Bônus para LONG com Stochastic em sobrevenda ({stoch_k:.1f}): {stoch_bonus:.2f}")
-            elif trade_direction == "SHORT" and stoch_k > 80 and stoch_d > 80:
-                # Bônus para SHORT com Stoch em sobrecompra
-                stoch_bonus = 0.15
-                entry_score = min(1.0, entry_score + stoch_bonus)
-                logger.info(f"Bônus para SHORT com Stochastic em sobrecompra ({stoch_k:.1f}): {stoch_bonus:.2f}")
-
-        # Verificar volume
-        if 'volume' in df.columns and len(df) > 5:
-            current_volume = df['volume'].iloc[-1]
-            avg_volume = df['volume'].iloc[-5:].mean()
-
-            # Em mercados de range, volume alto em extremos é bom sinal de reversão
-            if current_volume > avg_volume * 1.5:
-                volume_bonus = min((current_volume / avg_volume - 1) * 0.3, 0.15)
-                entry_score = min(1.0, entry_score + volume_bonus)
-                logger.info(f"Bônus para volume alto no extremo do range: {volume_bonus:.2f}")
-
-        # Em range, o alinhamento MTF pode ser menos importante
-        if mtf_alignment is not None:
-            # Se o MTF é neutro (value~0.5), isso é bom para range trading
-            mtf_neutrality = 1.0 - abs(mtf_alignment - 0.5) * 2
-            if mtf_neutrality > 0.6:  # MTF relativamente neutro
-                mtf_bonus = mtf_neutrality * 0.15
-                entry_score = min(1.0, entry_score + mtf_bonus)
-                logger.info(f"Bônus para MTF neutro: {mtf_bonus:.2f}")
-
-        # Usar limiar de entrada da configuração se não for fornecido
-        if entry_threshold is None:
-            entry_threshold = self.config.entry_threshold
-
-        # Decidir se deve entrar baseado na pontuação e no limiar
-        should_enter = entry_score >= entry_threshold
-
-        return should_enter, entry_score
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """

@@ -12,6 +12,8 @@ from services.base.schemas import TradingSignal
 from services.prediction.interfaces import ITpSlPredictionService
 from services.prediction.tpsl_prediction import TpSlPredictionService
 from strategies.base.model import BaseStrategy, StrategyConfig
+from strategies.patterns.entry_evaluator import EntryEvaluatorFactory
+from strategies.patterns.pattern_analyzer import PatternAnalyzerFactory
 
 
 class HighVolatilityStrategy(BaseStrategy):
@@ -43,6 +45,14 @@ class HighVolatilityStrategy(BaseStrategy):
         )
         super().__init__(config)
         self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
+
+        # Inicializar analisadores de padrões
+        pattern_factory = PatternAnalyzerFactory()
+        self.momentum_analyzer = pattern_factory.create_momentum_analyzer()
+        self.volatility_analyzer = pattern_factory.create_volatility_analyzer()
+
+        # Inicializar avaliador de entradas
+        self.entry_evaluator = EntryEvaluatorFactory.create_evaluator("HIGH_VOLATILITY", config)
 
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
@@ -206,126 +216,6 @@ class HighVolatilityStrategy(BaseStrategy):
 
         return should_activate
 
-    def _detect_breakout(self, df: pd.DataFrame, current_price: float) -> tuple[bool, float, str]:
-        """
-        Detecta breakouts de níveis importantes, comum em mercados voláteis.
-
-        Um breakout é um movimento que rompe um nível de suporte/resistência
-        ou padrão de consolidação, geralmente com aumento de volume.
-
-        Returns:
-            tuple: (breakout_detectado, força_do_breakout de 0 a 1, direção do breakout)
-        """
-        if len(df) < 20:  # Precisamos de histórico suficiente
-            return False, 0.0, "NONE"
-
-        breakout_detected = False
-        breakout_strength = 0.0
-        breakout_direction = "NONE"
-
-        # 1. Verificar breakout das Bollinger Bands
-        if 'boll_hband' in df.columns and 'boll_lband' in df.columns:
-            upper_band = df['boll_hband'].iloc[-1]
-            lower_band = df['boll_lband'].iloc[-1]
-
-            # Checar preços anteriores para ver se estávamos contidos nas bandas
-            prev_contained = True
-            for i in range(2, 6):  # Verificar 4 períodos anteriores
-                if i < len(df):
-                    if df['close'].iloc[-i] > df['boll_hband'].iloc[-i] or df['close'].iloc[-i] < df['boll_lband'].iloc[
-                        -i]:
-                        prev_contained = False
-                        break
-
-            # Se estávamos contidos e agora rompemos, é um breakout
-            if prev_contained:
-                # Breakout para cima
-                if current_price > upper_band:
-                    breakout_detected = True
-                    breakout_direction = "UP"
-                    # Força baseada na distância do breakout da banda
-                    breakout_strength = min((current_price - upper_band) / upper_band * 100, 2.0) / 2.0
-                    logger.info(
-                        f"Breakout de alta detectado: {current_price:.2f} > {upper_band:.2f} (força: {breakout_strength:.2f})"
-                    )
-
-                # Breakout para baixo
-                elif current_price < lower_band:
-                    breakout_detected = True
-                    breakout_direction = "DOWN"
-                    # Força baseada na distância do breakout da banda
-                    breakout_strength = min((lower_band - current_price) / lower_band * 100, 2.0) / 2.0
-                    logger.info(
-                        f"Breakout de baixa detectado: {current_price:.2f} < {lower_band:.2f} (força: {breakout_strength:.2f})"
-                    )
-
-        # 2. Verificar breakout de máximos/mínimos recentes
-        if not breakout_detected:
-            # Encontrar máximos e mínimos recentes (últimos 20 períodos)
-            recent_high = df['high'].iloc[-20:-1].max()
-            recent_low = df['low'].iloc[-20:-1].min()
-
-            # Breakout de máximos recentes
-            if current_price > recent_high * 1.005:  # 0.5% acima do máximo recente
-                days_since_high = 0
-                for i in range(2, 20):
-                    if i < len(df) and df['high'].iloc[-i] == recent_high:
-                        days_since_high = i - 1
-                        break
-
-                # Quanto mais tempo desde o último máximo, mais significativo o breakout
-                if days_since_high >= 5:
-                    breakout_detected = True
-                    breakout_direction = "UP"
-                    # Força baseada na distância percentual e no tempo
-                    pct_breakout = (current_price - recent_high) / recent_high * 100
-                    time_factor = min(days_since_high / 10, 1.0)
-                    breakout_strength = min(pct_breakout / 1.0, 1.0) * 0.6 + time_factor * 0.4
-
-                    logger.info(
-                        f"Breakout de máximos recentes: {current_price:.2f} > {recent_high:.2f} "
-                        f"({pct_breakout:.2f}%, {days_since_high} períodos atrás, força: {breakout_strength:.2f})"
-                    )
-
-            # Breakout de mínimos recentes
-            elif current_price < recent_low * 0.995:  # 0.5% abaixo do mínimo recente
-                days_since_low = 0
-                for i in range(2, 20):
-                    if i < len(df) and df['low'].iloc[-i] == recent_low:
-                        days_since_low = i - 1
-                        break
-
-                # Quanto mais tempo desde o último mínimo, mais significativo o breakout
-                if days_since_low >= 5:
-                    breakout_detected = True
-                    breakout_direction = "DOWN"
-                    # Força baseada na distância percentual e no tempo
-                    pct_breakout = (recent_low - current_price) / recent_low * 100
-                    time_factor = min(days_since_low / 10, 1.0)
-                    breakout_strength = min(pct_breakout / 1.0, 1.0) * 0.6 + time_factor * 0.4
-
-                    logger.info(
-                        f"Breakout de mínimos recentes: {current_price:.2f} < {recent_low:.2f} "
-                        f"({pct_breakout:.2f}%, {days_since_low} períodos atrás, força: {breakout_strength:.2f})"
-                    )
-
-        # 3. Verificar confirmação por volume
-        if breakout_detected and 'volume' in df.columns:
-            current_volume = df['volume'].iloc[-1]
-            avg_volume = df['volume'].iloc[-10:-1].mean()
-
-            # Volume acima da média confirma breakout
-            if current_volume > avg_volume * 1.3:  # 30% acima da média
-                vol_boost = min((current_volume / avg_volume - 1.0) * 0.5, 0.3)
-                breakout_strength = min(breakout_strength + vol_boost, 1.0)
-                logger.info(f"Breakout confirmado por volume: +{vol_boost:.2f} na força")
-            # Volume baixo reduz a confiança
-            elif current_volume < avg_volume * 0.7:  # 30% abaixo da média
-                vol_penalty = min((1.0 - current_volume / avg_volume) * 0.5, 0.3)
-                breakout_strength = max(breakout_strength - vol_penalty, 0.0)
-                logger.info(f"Breakout com volume baixo: -{vol_penalty:.2f} na força")
-
-        return breakout_detected, breakout_strength, breakout_direction
 
     def _detect_strong_momentum(self, df: pd.DataFrame) -> tuple[bool, float, str]:
         """
@@ -476,161 +366,6 @@ class HighVolatilityStrategy(BaseStrategy):
 
         return strong_momentum, momentum_strength, momentum_direction
 
-    def _detect_reversal_potential(self, df: pd.DataFrame) -> tuple[bool, float, str]:
-        """
-        Detecta potencial de reversão em movimento extremo, comum após volatilidade alta.
-
-        Returns:
-            tuple: (potencial_de_reversão, força_do_sinal de 0 a 1, direção da reversão)
-        """
-        if len(df) < 10:  # Precisamos de histórico suficiente
-            return False, 0.0, "NONE"
-
-        reversal_potential = False
-        reversal_strength = 0.0
-        reversal_direction = "NONE"
-
-        # 1. Verificar RSI em níveis extremos
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-            prev_rsi = df['rsi'].iloc[-2] if len(df) > 2 else 50
-
-            # RSI em sobrevenda e começando a subir
-            if rsi < 30 and rsi > prev_rsi:
-                reversal_potential = True
-                reversal_direction = "UP"
-                # Força baseada em quão extremo está o RSI
-                rsi_strength = min((30 - rsi) / 20, 1.0)
-                reversal_strength = rsi_strength * 0.7
-
-                logger.info(f"Potencial de reversão de ALTA: RSI={rsi:.1f} (força: {reversal_strength:.2f})")
-
-            # RSI em sobrecompra e começando a cair
-            elif rsi > 70 and rsi < prev_rsi:
-                reversal_potential = True
-                reversal_direction = "DOWN"
-                # Força baseada em quão extremo está o RSI
-                rsi_strength = min((rsi - 70) / 20, 1.0)
-                reversal_strength = rsi_strength * 0.7
-
-                logger.info(f"Potencial de reversão de BAIXA: RSI={rsi:.1f} (força: {reversal_strength:.2f})")
-
-        # 2. Verificar padrões de velas de reversão
-        if len(df) >= 3:
-            # Obter dados dos últimos candles
-            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
-            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
-            c2, o2 = df['close'].iloc[-3], df['open'].iloc[-3]
-            h0, l0 = df['high'].iloc[-1], df['low'].iloc[-1]
-            h1, l1 = df['high'].iloc[-2], df['low'].iloc[-2]
-
-            # Potencial de reversão de BAIXA
-            if (c2 > o2 and c1 > o1  # Duas velas de alta
-                    and c0 < o0  # Seguidas por uma vela de baixa
-                    and c0 < c1  # Fechamento abaixo do anterior
-                    and abs(c0 - o0) > abs(c1 - o1) * 1.2):  # Vela de baixa mais forte
-
-                if not reversal_potential or (reversal_potential and reversal_direction == "DOWN"):
-                    # Se ainda não temos sinal ou confirma direção existente
-                    reversal_potential = True
-                    reversal_direction = "DOWN"
-                    candle_strength = min(abs(c0 - o0) / (h1 - l1), 1.0)
-
-                    if not reversal_strength:
-                        reversal_strength = candle_strength * 0.6
-                    else:
-                        # Adicionar à força existente
-                        reversal_strength = min(reversal_strength + candle_strength * 0.3, 1.0)
-
-                    logger.info(
-                        f"Padrão de reversão de BAIXA: velas de alta seguidas por vela de baixa forte (força: {candle_strength:.2f})"
-                    )
-
-            # Potencial de reversão de ALTA
-            elif (c2 < o2 and c1 < o1  # Duas velas de baixa
-                  and c0 > o0  # Seguidas por uma vela de alta
-                  and c0 > c1  # Fechamento acima do anterior
-                  and abs(c0 - o0) > abs(c1 - o1) * 1.2):  # Vela de alta mais forte
-
-                if not reversal_potential or (reversal_potential and reversal_direction == "UP"):
-                    # Se ainda não temos sinal ou confirma direção existente
-                    reversal_potential = True
-                    reversal_direction = "UP"
-                    candle_strength = min(abs(c0 - o0) / (h1 - l1), 1.0)
-
-                    if not reversal_strength:
-                        reversal_strength = candle_strength * 0.6
-                    else:
-                        # Adicionar à força existente
-                        reversal_strength = min(reversal_strength + candle_strength * 0.3, 1.0)
-
-                    logger.info(
-                        f"Padrão de reversão de ALTA: velas de baixa seguidas por vela de alta forte (força: {candle_strength:.2f})"
-                    )
-
-        # 3. Verificar divergências entre preço e osciladores
-        # Divergência bullish: preço faz mínimos mais baixos, mas oscilador faz mínimos mais altos
-        if 'rsi' in df.columns and len(df) >= 10:
-            # Encontrar mínimos e máximos locais de preço
-            lows = df['low'].iloc[-10:].values
-            highs = df['high'].iloc[-10:].values
-            low_indices = [i for i in range(1, len(lows) - 1) if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]]
-            high_indices = [i for i in range(1, len(highs) - 1) if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]]
-
-            # Encontrar mínimos e máximos correspondentes no RSI
-            rsi_values = df['rsi'].iloc[-10:].values
-
-            # Verificar divergência bullish (mínimos)
-            if len(low_indices) >= 2:
-                idx1, idx2 = low_indices[-2], low_indices[-1]
-                # Se preço fez mínimo mais baixo
-                if lows[idx2] < lows[idx1]:
-                    # Mas RSI fez mínimo mais alto (divergência bullish)
-                    if rsi_values[idx2] > rsi_values[idx1]:
-                        # Divergência significativa
-                        if rsi_values[idx2] - rsi_values[idx1] > 2.0:
-                            if not reversal_potential or (reversal_potential and reversal_direction == "UP"):
-                                reversal_potential = True
-                                reversal_direction = "UP"
-                                div_strength = min((rsi_values[idx2] - rsi_values[idx1]) / 10, 0.8)
-
-                                if not reversal_strength:
-                                    reversal_strength = div_strength
-                                else:
-                                    # Adicionar à força existente
-                                    reversal_strength = min(reversal_strength + div_strength * 0.5, 1.0)
-
-                                logger.info(
-                                    f"Divergência bullish: Preço {lows[idx1]:.2f}->{lows[idx2]:.2f}, "
-                                    f"RSI {rsi_values[idx1]:.1f}->{rsi_values[idx2]:.1f} (força: {div_strength:.2f})"
-                                )
-
-            # Verificar divergência bearish (máximos)
-            if len(high_indices) >= 2:
-                idx1, idx2 = high_indices[-2], high_indices[-1]
-                # Se preço fez máximo mais alto
-                if highs[idx2] > highs[idx1]:
-                    # Mas RSI fez máximo mais baixo (divergência bearish)
-                    if rsi_values[idx2] < rsi_values[idx1]:
-                        # Divergência significativa
-                        if rsi_values[idx1] - rsi_values[idx2] > 2.0:
-                            if not reversal_potential or (reversal_potential and reversal_direction == "DOWN"):
-                                reversal_potential = True
-                                reversal_direction = "DOWN"
-                                div_strength = min((rsi_values[idx1] - rsi_values[idx2]) / 10, 0.8)
-
-                                if not reversal_strength:
-                                    reversal_strength = div_strength
-                                else:
-                                    # Adicionar à força existente
-                                    reversal_strength = min(reversal_strength + div_strength * 0.5, 1.0)
-
-                                logger.info(
-                                    f"Divergência bearish: Preço {highs[idx1]:.2f}->{highs[idx2]:.2f}, "
-                                    f"RSI {rsi_values[idx1]:.1f}->{rsi_values[idx2]:.1f} (força: {div_strength:.2f})"
-                                )
-
-        return reversal_potential, reversal_strength, reversal_direction
 
     async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
@@ -655,13 +390,15 @@ class HighVolatilityStrategy(BaseStrategy):
                 return None
 
         # 2. Detectar breakouts
-        breakout_detected, breakout_strength, breakout_direction = self._detect_breakout(df, current_price)
+        breakout_detected, breakout_strength, breakout_direction = self.volatility_analyzer.detect_breakout(
+            df, current_price
+        )
 
         # 3. Detectar momentum forte
         strong_momentum, momentum_strength, momentum_direction = self._detect_strong_momentum(df)
 
         # 4. Detectar potencial de reversão
-        reversal_potential, reversal_strength, reversal_direction = self._detect_reversal_potential(df)
+        reversal_potential, reversal_strength, reversal_direction = self.momentum_analyzer.detect_reversal_potential(df)
 
         # 5. Verificar alinhamento multi-timeframe
         mtf_aligned = False
@@ -797,7 +534,7 @@ class HighVolatilityStrategy(BaseStrategy):
                 predicted_tp_pct = adjusted_tp
 
         # Avaliar a qualidade da entrada
-        should_enter, entry_score = self.evaluate_entry_quality(
+        should_enter, entry_score = self.entry_evaluator.evaluate_entry_quality(
             df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct,
             entry_threshold=self.config.entry_threshold
         )
@@ -885,119 +622,6 @@ class HighVolatilityStrategy(BaseStrategy):
 
         return signal
 
-    def evaluate_entry_quality(
-            self,
-            df: pd.DataFrame,
-            current_price: float,
-            trade_direction: str,
-            predicted_tp_pct: float = None,
-            predicted_sl_pct: float = None,
-            entry_threshold: float = None,
-            mtf_alignment: float = None
-    ) -> tuple[bool, float]:
-        """
-        Avalia a qualidade da entrada em condições de alta volatilidade.
-
-        Em alta volatilidade, prioriza R:R elevados e entradas alinhadas com
-        a tendência principal, especialmente em pullbacks.
-
-        Args:
-            df: DataFrame com dados históricos
-            current_price: Preço atual do ativo
-            trade_direction: "LONG" ou "SHORT"
-            predicted_tp_pct: Take profit percentual previsto
-            predicted_sl_pct: Stop loss percentual previsto
-            entry_threshold: Limiar opcional para qualidade de entrada
-            mtf_alignment: Score de alinhamento multi-timeframe (0-1)
-
-        Returns:
-            tuple[bool, float]: (Deve entrar, pontuação da entrada)
-        """
-        # Calcular razão risco-recompensa se tp e sl forem fornecidos
-        if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
-            rr_ratio = abs(predicted_tp_pct) / abs(predicted_sl_pct)
-
-            # Em alta volatilidade, exigir R:R maior
-            should_enter = rr_ratio >= self.config.min_rr_ratio
-
-            # Pontuação básica baseada em R:R
-            entry_score = min(rr_ratio / 4.0, 1.0)  # Pontuação de 0 a 1
-        else:
-            # Valores padrão se tp e sl não forem fornecidos
-            should_enter = False
-            entry_score = 0.0
-
-        # Em alta volatilidade, dar preferência para operações na direção da tendência
-        trend_direction = self.calculate_trend_direction(df)
-        if (trade_direction == "LONG" and trend_direction == "UPTREND") or \
-                (trade_direction == "SHORT" and trend_direction == "DOWNTREND"):
-            # Bônus para trades na direção da tendência
-            entry_score = min(1.0, entry_score * 1.3)
-        else:
-            # Penalidade para trades contra a tendência em volatilidade alta
-            entry_score = entry_score * 0.7
-
-        # Verificar RSI para evitar operações em extremos
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-            if (trade_direction == "LONG" and rsi < 20) or (trade_direction == "SHORT" and rsi > 80):
-                # Bônus para reversões em níveis extremos
-                entry_score = min(1.0, entry_score * 1.2)
-            elif (trade_direction == "LONG" and rsi > 70) or (trade_direction == "SHORT" and rsi < 30):
-                # Penalidade para entradas na direção de sobrecompra/sobrevenda
-                entry_score = entry_score * 0.6
-
-        # Verificar Bollinger Bands para identificar extremos
-        if 'boll_width' in df.columns:
-            boll_width = df['boll_width'].iloc[-1]
-            avg_width = df['boll_width'].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0.02
-
-            # Se as bandas estão muito largas, exigir mais qualidade
-            if boll_width > (avg_width * 2):
-                entry_score = entry_score * 0.8
-                logger.info(f"Bandas muito largas (BB width={boll_width:.4f}): reduzindo score")
-
-        # Usar alinhamento multi-timeframe para refinar a decisão
-        if mtf_alignment is not None:
-            # Em alta volatilidade, o alinhamento multitimeframe é crucial
-            entry_score = entry_score * (0.5 + mtf_alignment * 0.5)
-
-        # Verificar se há divergências que aumentem a confiança
-        # Divergência bearish = bom para SHORT, divergência bullish = bom para LONG
-        _, reversal_strength, reversal_direction = self._detect_reversal_potential(df)
-        if reversal_strength > 0:
-            if (trade_direction == "LONG" and reversal_direction == "UP") or \
-                    (trade_direction == "SHORT" and reversal_direction == "DOWN"):
-                # Bônus para trades alinhados com divergências
-                reversal_bonus = reversal_strength * 0.2
-                entry_score = min(1.0, entry_score + reversal_bonus)
-                logger.info(f"Bônus para divergência concordante: +{reversal_bonus:.2f}")
-
-        # Ajustar conforme o tipo de entrada (reação vs. breakout)
-        breakout_detected, breakout_strength, breakout_direction = self._detect_breakout(df, current_price)
-        if breakout_detected and breakout_strength > 0.5:
-            if (trade_direction == "LONG" and breakout_direction == "UP") or \
-                    (trade_direction == "SHORT" and breakout_direction == "DOWN"):
-                # Em breakouts fortes, ser mais confiante se alinhado
-                breakout_bonus = (breakout_strength - 0.5) * 0.3
-                entry_score = min(1.0, entry_score + breakout_bonus)
-                logger.info(f"Bônus para breakout forte: +{breakout_bonus:.2f}")
-
-        # Verificar início recente de volatilidade
-        if self.volatility_data.get('volatility_onset'):
-            # Em início de volatilidade, dar um pequeno bônus para capitalizar no movimento
-            onset_bonus = 0.1
-            entry_score = min(1.0, entry_score + onset_bonus)
-            logger.info(f"Bônus para início recente de volatilidade: +{onset_bonus:.2f}")
-
-        # Usar limiar de entrada da configuração se não for fornecido
-        if entry_threshold is None:
-            entry_threshold = self.config.entry_threshold
-
-        # Decidir se deve entrar baseado na pontuação e no limiar
-        should_enter = entry_score >= entry_threshold
-
-        return should_enter, entry_score
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
@@ -1169,6 +793,15 @@ class LowVolatilityStrategy(BaseStrategy):
         super().__init__(config)
         self.prediction_service: ITpSlPredictionService = TpSlPredictionService()
 
+        # Inicializar analisadores de padrões
+        pattern_factory = PatternAnalyzerFactory()
+        self.momentum_analyzer = pattern_factory.create_momentum_analyzer()
+        self.volatility_analyzer = pattern_factory.create_volatility_analyzer()
+        self.trend_analyzer = pattern_factory.create_trend_analyzer()
+
+        # Inicializar avaliador de entradas
+        self.entry_evaluator = EntryEvaluatorFactory.create_evaluator("LOW_VOLATILITY", config)
+
         # Armazenar cache de informações sobre a volatilidade
         self.volatility_data = {
             'atr_pct': None,
@@ -1316,248 +949,7 @@ class LowVolatilityStrategy(BaseStrategy):
 
         return should_activate
 
-    def _detect_deviation_from_mean(self, df: pd.DataFrame, current_price: float) -> tuple[bool, float, str]:
-        """
-        Detecta desvios significativos da média, oportunidades em baixa volatilidade.
 
-        Returns:
-            tuple: (desvio_detectado, força_do_desvio de 0 a 1, direção da reversão esperada)
-        """
-        if len(df) < 10:  # Precisamos de histórico suficiente
-            return False, 0.0, "NONE"
-
-        deviation_detected = False
-        deviation_strength = 0.0
-        mean_reversion_direction = "NONE"
-
-        # 1. Verificar desvio das Bollinger Bands (principal indicador)
-        if 'boll_pct_b' in df.columns:
-            pct_b = df['boll_pct_b'].iloc[-1]
-
-            # Valores extremos indicam oportunidade de mean-reversion
-            if pct_b < 0.1:  # Extremo inferior
-                deviation_detected = True
-                mean_reversion_direction = "UP"  # Esperamos reversão para cima
-                # Força baseada em quão extremo é o desvio
-                deviation_strength = min((0.1 - pct_b) * 10, 1.0)
-                logger.info(f"Desvio extremo inferior: %B={pct_b:.2f} (força: {deviation_strength:.2f})")
-
-            elif pct_b > 0.9:  # Extremo superior
-                deviation_detected = True
-                mean_reversion_direction = "DOWN"  # Esperamos reversão para baixo
-                # Força baseada em quão extremo é o desvio
-                deviation_strength = min((pct_b - 0.9) * 10, 1.0)
-                logger.info(f"Desvio extremo superior: %B={pct_b:.2f} (força: {deviation_strength:.2f})")
-
-        # 2. Verificar desvio da média móvel (EMA)
-        if 'ema_short' in df.columns:
-            ema = df['ema_short'].iloc[-1]
-
-            # Calcular desvio percentual
-            price_deviation = (current_price - ema) / ema * 100
-
-            # Desvio significativo em mercado de baixa volatilidade (>0.5%)
-            if abs(price_deviation) > 0.5:
-                ema_deviation_strength = min(abs(price_deviation) / 1.0, 1.0)
-
-                # Se já temos um sinal de desvio, verificar a concordância
-                if deviation_detected:
-                    if (price_deviation < 0 and mean_reversion_direction == "UP") or \
-                            (price_deviation > 0 and mean_reversion_direction == "DOWN"):
-                        # Adicionar ao sinal existente se confirma a direção
-                        deviation_strength = (deviation_strength * 0.7) + (ema_deviation_strength * 0.3)
-                        logger.info(f"Desvio da EMA confirma direção: {price_deviation:.2f}%")
-                # Caso contrário, criar novo sinal
-                else:
-                    deviation_detected = True
-                    deviation_strength = ema_deviation_strength * 0.6  # Peso menor que Bollinger
-                    mean_reversion_direction = "UP" if price_deviation < 0 else "DOWN"
-                    logger.info(
-                        f"Desvio significativo da EMA: {price_deviation:.2f}% (força: {ema_deviation_strength:.2f})"
-                    )
-
-        # 3. Verificar RSI em extremos
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-
-            # RSI em sobrevenda = oportunidade de alta
-            if rsi < 30:
-                rsi_strength = min((30 - rsi) / 20, 1.0)
-
-                # Se já temos um sinal, verificar concordância
-                if deviation_detected:
-                    if mean_reversion_direction == "UP":
-                        # Adicionar ao sinal existente
-                        deviation_strength = (deviation_strength * 0.7) + (rsi_strength * 0.3)
-                        logger.info(f"RSI em sobrevenda confirma reversão para cima: {rsi:.1f}")
-                # Caso contrário, criar novo sinal
-                else:
-                    deviation_detected = True
-                    deviation_strength = rsi_strength * 0.6
-                    mean_reversion_direction = "UP"
-                    logger.info(f"RSI em sobrevenda: {rsi:.1f} (força: {rsi_strength:.2f})")
-
-            # RSI em sobrecompra = oportunidade de baixa
-            elif rsi > 70:
-                rsi_strength = min((rsi - 70) / 20, 1.0)
-
-                # Se já temos um sinal, verificar concordância
-                if deviation_detected:
-                    if mean_reversion_direction == "DOWN":
-                        # Adicionar ao sinal existente
-                        deviation_strength = (deviation_strength * 0.7) + (rsi_strength * 0.3)
-                        logger.info(f"RSI em sobrecompra confirma reversão para baixo: {rsi:.1f}")
-                # Caso contrário, criar novo sinal
-                else:
-                    deviation_detected = True
-                    deviation_strength = rsi_strength * 0.6
-                    mean_reversion_direction = "DOWN"
-                    logger.info(f"RSI em sobrecompra: {rsi:.1f} (força: {rsi_strength:.2f})")
-
-        # 4. Verificar Stochastic em extremos
-        if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
-            stoch_k = df['stoch_k'].iloc[-1]
-            stoch_d = df['stoch_d'].iloc[-1]
-
-            # Stochastic em sobrevenda = oportunidade de alta
-            if stoch_k < 20 and stoch_d < 20:
-                stoch_strength = min((20 - stoch_k) / 20, 1.0) * 0.8  # Peso menor que RSI
-
-                # Se já temos um sinal, verificar concordância
-                if deviation_detected:
-                    if mean_reversion_direction == "UP":
-                        # Adicionar ao sinal existente
-                        deviation_strength = (deviation_strength * 0.8) + (stoch_strength * 0.2)
-                        logger.info(
-                            f"Stochastic em sobrevenda confirma reversão para cima: K={stoch_k:.1f}, D={stoch_d:.1f}"
-                        )
-                # Caso contrário, criar novo sinal
-                else:
-                    deviation_detected = True
-                    deviation_strength = stoch_strength * 0.5
-                    mean_reversion_direction = "UP"
-                    logger.info(
-                        f"Stochastic em sobrevenda: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {stoch_strength:.2f})"
-                    )
-
-            # Stochastic em sobrecompra = oportunidade de baixa
-            elif stoch_k > 80 and stoch_d > 80:
-                stoch_strength = min((stoch_k - 80) / 20, 1.0) * 0.8  # Peso menor que RSI
-
-                # Se já temos um sinal, verificar concordância
-                if deviation_detected:
-                    if mean_reversion_direction == "DOWN":
-                        # Adicionar ao sinal existente
-                        deviation_strength = (deviation_strength * 0.8) + (stoch_strength * 0.2)
-                        logger.info(
-                            f"Stochastic em sobrecompra confirma reversão para baixo: K={stoch_k:.1f}, D={stoch_d:.1f}"
-                        )
-                # Caso contrário, criar novo sinal
-                else:
-                    deviation_detected = True
-                    deviation_strength = stoch_strength * 0.5
-                    mean_reversion_direction = "DOWN"
-                    logger.info(
-                        f"Stochastic em sobrecompra: K={stoch_k:.1f}, D={stoch_d:.1f} (força: {stoch_strength:.2f})"
-                    )
-
-        return deviation_detected, deviation_strength, mean_reversion_direction
-
-    def _detect_squeeze_breakout(self, df: pd.DataFrame) -> tuple[bool, float, str]:
-        """
-        Detecta breakouts após compressão de volatilidade, oportunidade em
-        mercados que passam de baixa para média/alta volatilidade.
-
-        Returns:
-            tuple: (breakout_detectado, força_do_breakout de 0 a 1, direção do breakout)
-        """
-        if len(df) < 12:  # Precisamos de histórico suficiente
-            return False, 0.0, "NONE"
-
-        squeeze_breakout = False
-        breakout_strength = 0.0
-        breakout_direction = "NONE"
-
-        # 1. Verificar se houve compressão recente nas Bollinger Bands
-        if 'boll_width' in df.columns:
-            current_width = df['boll_width'].iloc[-1]
-            prev_width = df['boll_width'].iloc[-2] if len(df) > 2 else current_width
-
-            # Verificar histórico recente para detectar compressão seguida de expansão
-            compression_period = False
-            if len(df) > 10:
-                # Calcular média e desvio padrão das últimas 10 barras
-                avg_width = df['boll_width'].iloc[-8:].mean()
-                std_width = df['boll_width'].iloc[-8:].std()
-
-                # Verificar se houve compressão significativa seguida de expansão
-                min_width = df['boll_width'].iloc[-8:].min()
-
-                # Compressão = pelo menos 1 barra com largura < (média - 1 desvio padrão)
-                compression_threshold = avg_width - std_width
-                compression_period = min_width < compression_threshold
-
-                # Expansão atual = largura atual > largura anterior
-                current_expanding = current_width > prev_width * 1.1  # 10% maior
-
-                if compression_period and current_expanding:
-                    # Determinar direção do breakout baseado na vela atual
-                    if len(df) > 1:
-                        if df['close'].iloc[-1] > df['open'].iloc[-1]:
-                            squeeze_breakout = True
-                            breakout_direction = "UP"
-                            # Força baseada em quanto a largura expandiu
-                            expansion_ratio = current_width / min_width
-                            breakout_strength = min((expansion_ratio - 1.0) * 0.5, 1.0)
-                            logger.info(
-                                f"Breakout de squeeze para CIMA: expansão={expansion_ratio:.2f}x "
-                                f"(força: {breakout_strength:.2f})"
-                            )
-
-                        elif df['close'].iloc[-1] < df['open'].iloc[-1]:
-                            squeeze_breakout = True
-                            breakout_direction = "DOWN"
-                            # Força baseada em quanto a largura expandiu
-                            expansion_ratio = current_width / min_width
-                            breakout_strength = min((expansion_ratio - 1.0) * 0.5, 1.0)
-                            logger.info(
-                                f"Breakout de squeeze para BAIXO: expansão={expansion_ratio:.2f}x "
-                                f"(força: {breakout_strength:.2f})"
-                            )
-
-        # 2. Verificar confirmação pelo MACD
-        if squeeze_breakout and 'macd_histogram' in df.columns and len(df) > 3:
-            hist = df['macd_histogram'].iloc[-1]
-            prev_hist = df['macd_histogram'].iloc[-2]
-
-            # MACD histograma crescendo confirma breakout para cima
-            if breakout_direction == "UP" and hist > 0 and hist > prev_hist:
-                # Adicionar força baseada na magnitude do histograma
-                macd_strength = min(abs(hist / 0.0005), 0.3)
-                breakout_strength = min(breakout_strength + macd_strength, 1.0)
-                logger.info(f"MACD confirma breakout para cima: {hist:.6f} > {prev_hist:.6f}")
-
-            # MACD histograma decrescendo confirma breakout para baixo
-            elif breakout_direction == "DOWN" and hist < 0 and hist < prev_hist:
-                # Adicionar força baseada na magnitude do histograma
-                macd_strength = min(abs(hist / 0.0005), 0.3)
-                breakout_strength = min(breakout_strength + macd_strength, 1.0)
-                logger.info(f"MACD confirma breakout para baixo: {hist:.6f} < {prev_hist:.6f}")
-
-        # 3. Verificar confirmação por volume
-        if squeeze_breakout and 'volume' in df.columns and len(df) > 10:
-            current_volume = df['volume'].iloc[-1]
-            avg_volume = df['volume'].iloc[-10:-1].mean()
-
-            # Volume acima da média confirma breakout
-            if current_volume > avg_volume * 1.3:  # 30% acima da média
-                vol_strength = min((current_volume / avg_volume - 1.0) * 0.5, 0.3)
-                breakout_strength = min(breakout_strength + vol_strength, 1.0)
-                logger.info(
-                    f"Volume confirma breakout: {current_volume:.0f} vs {avg_volume:.0f} (força: +{vol_strength:.2f})"
-                )
-
-        return squeeze_breakout, breakout_strength, breakout_direction
 
     async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
@@ -1574,12 +966,12 @@ class LowVolatilityStrategy(BaseStrategy):
             return None
 
         # 1. Detectar desvios da média para mean-reversion
-        deviation_detected, deviation_strength, reversion_direction = self._detect_deviation_from_mean(
+        deviation_detected, deviation_strength, reversion_direction = self.volatility_analyzer.detect_deviation_from_mean(
             df, current_price
         )
 
         # 2. Detectar breakouts após squeeze (compressão de volatilidade)
-        squeeze_breakout, breakout_strength, breakout_direction = self._detect_squeeze_breakout(df)
+        squeeze_breakout, breakout_strength, breakout_direction = self.volatility_analyzer.detect_squeeze_breakout(df)
 
         # 3. Verificar alinhamento multi-timeframe
         mtf_neutral = False
@@ -1712,7 +1104,7 @@ class LowVolatilityStrategy(BaseStrategy):
                 predicted_sl_pct = max_sl_pct
 
         # Avaliar a qualidade da entrada
-        should_enter, entry_score = self.evaluate_entry_quality(
+        should_enter, entry_score = self.entry_evaluator.evaluate_entry_quality(
             df, current_price, signal_direction, predicted_tp_pct, predicted_sl_pct,
             entry_threshold=self.config.entry_threshold
         )
@@ -1797,123 +1189,6 @@ class LowVolatilityStrategy(BaseStrategy):
 
         return signal
 
-    def evaluate_entry_quality(
-            self,
-            df: pd.DataFrame,
-            current_price: float,
-            trade_direction: str,
-            predicted_tp_pct: float = None,
-            predicted_sl_pct: float = None,
-            entry_threshold: float = None,
-            mtf_alignment: float = None
-    ) -> tuple[bool, float]:
-        """
-        Avalia a qualidade da entrada em condições de baixa volatilidade.
-
-        Em baixa volatilidade, prioriza entradas precisas em extremos
-        com boa relação risco-recompensa, mesmo que menor que em mercados voláteis.
-
-        Args:
-            df: DataFrame com dados históricos
-            current_price: Preço atual do ativo
-            trade_direction: "LONG" ou "SHORT"
-            predicted_tp_pct: Take profit percentual previsto
-            predicted_sl_pct: Stop loss percentual previsto
-            entry_threshold: Limiar opcional para qualidade de entrada
-            mtf_alignment: Score de alinhamento multi-timeframe (0-1)
-
-        Returns:
-            tuple[bool, float]: (Deve entrar, pontuação da entrada)
-        """
-        # Calcular razão risco-recompensa se tp e sl forem fornecidos
-        if predicted_tp_pct is not None and predicted_sl_pct is not None and predicted_sl_pct > 0:
-            rr_ratio = abs(predicted_tp_pct) / abs(predicted_sl_pct)
-
-            # Em baixa volatilidade, podemos aceitar R:R um pouco menor
-            should_enter = rr_ratio >= self.config.min_rr_ratio
-
-            # Pontuação básica baseada em R:R (normalizada)
-            entry_score = min(rr_ratio / 2.5, 1.0)  # Pontuação de 0 a 1
-        else:
-            # Valores padrão se tp e sl não forem fornecidos
-            should_enter = False
-            entry_score = 0.0
-
-        # Em baixa volatilidade, verificar extremos para mean-reversion
-        if 'boll_pct_b' in df.columns:
-            pct_b = df['boll_pct_b'].iloc[-1]
-
-            # Mean-reversion para LONG quando preço está perto da banda inferior
-            if trade_direction == "LONG" and pct_b < 0.3:
-                # Bônus para entradas em extremos
-                reversion_bonus = (0.2 - pct_b) * 3
-                entry_score = min(1.0, entry_score + reversion_bonus)
-                logger.info(f"Bônus para LONG na banda inferior (%B={pct_b:.2f}): +{reversion_bonus:.2f}")
-
-            # Mean-reversion para SHORT quando preço está perto da banda superior
-            elif trade_direction == "SHORT" and pct_b > 0.7:
-                # Bônus para entradas em extremos
-                reversion_bonus = (pct_b - 0.7) * 3
-                entry_score = min(1.0, entry_score + reversion_bonus)
-                logger.info(f"Bônus para SHORT na banda superior (%B={pct_b:.2f}): +{reversion_bonus:.2f}")
-
-        # Verificar osciladores para confirmar mean-reversion
-        if 'rsi' in df.columns:
-            rsi = df['rsi'].iloc[-1]
-            rsi_prev = df['rsi'].iloc[-2] if len(df) > 2 else 50
-
-            # RSI em sobrevenda para LONG
-            if trade_direction == "LONG" and rsi < 30:
-                # Bônus maior se o RSI está começando a virar para cima
-                rsi_bonus = (30 - rsi) / 30
-                if rsi > rsi_prev:
-                    rsi_bonus *= 1.5
-
-                entry_score = min(1.0, entry_score + rsi_bonus * 0.3)
-                logger.info(f"Bônus para LONG com RSI em sobrevenda ({rsi:.1f}): +{rsi_bonus * 0.3:.2f}")
-
-            # RSI em sobrecompra para SHORT
-            elif trade_direction == "SHORT" and rsi > 70:
-                # Bônus maior se o RSI está começando a virar para baixo
-                rsi_bonus = (rsi - 70) / 30
-                if rsi < rsi_prev:
-                    rsi_bonus *= 1.5
-
-                entry_score = min(1.0, entry_score + rsi_bonus * 0.3)
-                logger.info(f"Bônus para SHORT com RSI em sobrecompra ({rsi:.1f}): +{rsi_bonus * 0.3:.2f}")
-
-        # Verificar Squeeze para entradas em breakout
-        if 'boll_width' in df.columns and len(df) > 5:
-            current_width = df['boll_width'].iloc[-1]
-            prev_width = df['boll_width'].iloc[-2]
-            avg_width = df['boll_width'].iloc[-10:].mean() if len(df) >= 10 else current_width
-
-            # Compressão seguida de expansão
-            squeeze_bonus = 0.0
-            if current_width < avg_width * 0.8 and current_width > prev_width * 1.1:
-                # Confirmar direção do breakout
-                if (trade_direction == "LONG" and df['close'].iloc[-1] > df['open'].iloc[-1]) or \
-                        (trade_direction == "SHORT" and df['close'].iloc[-1] < df['open'].iloc[-1]):
-                    squeeze_bonus = 0.25
-                    entry_score = min(1.0, entry_score + squeeze_bonus)
-                    logger.info(f"Bônus para breakout após squeeze: +{squeeze_bonus:.2f}")
-
-        # Em baixa volatilidade, o MTF neutro é favorável
-        if mtf_alignment is not None:
-            # Quanto mais perto de 0.5 (neutro), melhor
-            neutrality = 1.0 - abs(mtf_alignment - 0.5) * 2
-            if neutrality > 0.7:  # Relativamente neutro
-                entry_score = min(1.0, entry_score + neutrality * 0.1)
-                logger.info(f"Bônus para MTF neutro: +{neutrality * 0.1:.2f}")
-
-        # Usar limiar de entrada da configuração se não for fornecido
-        if entry_threshold is None:
-            entry_threshold = self.config.entry_threshold
-
-        # Decidir se deve entrar baseado na pontuação e no limiar
-        should_enter = entry_score >= entry_threshold
-
-        return should_enter, entry_score
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """
