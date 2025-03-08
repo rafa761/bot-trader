@@ -34,7 +34,8 @@ class LSTMTrainer(BaseTrainer):
         self.config = config
         self.history = None
 
-    def _prepare_sequences(self, X: np.ndarray, y: np.ndarray, sequence_length: int) -> tuple[np.ndarray, np.ndarray]:
+    @staticmethod
+    def _prepare_sequences(X: np.ndarray, y: np.ndarray, sequence_length: int) -> tuple[np.ndarray, np.ndarray]:
         """
         Prepara as sequências para treinamento do LSTM.
 

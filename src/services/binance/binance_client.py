@@ -24,31 +24,32 @@ class BinanceClient:
         O cliente é inicializado como None e deve ser criado com await initialize().
         """
         self.client = None
-        self._initialized = False
 
     async def initialize(self) -> None:
         """
         Inicializa o cliente assíncrono da Binance.
         Deve ser chamado após a criação da instância e antes de usar qualquer outro método.
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             logger.info("Iniciando client assíncrono da Binance...")
             self.client = await AsyncClient.create(
                 api_key=settings.BINANCE_API_KEY_TESTNET,
                 api_secret=settings.BINANCE_API_SECRET_TESTNET,
                 testnet=True
             )
-            self._initialized = True
             logger.info("Client assíncrono da Binance iniciado")
+
+    def is_client_initialized(self) -> bool:
+        """Verifica se o cliente Binance está inicializado."""
+        return hasattr(self, 'client') and self.client is not None
 
     async def close(self) -> None:
         """
         Fecha a conexão do cliente assíncrono.
         Deve ser chamado quando não precisar mais do cliente.
         """
-        if self.client and self._initialized:
+        if self.client and self.is_client_initialized():
             await self.client.close_connection()
-            self._initialized = False
             logger.info("Conexão do client assíncrono da Binance fechada")
 
     async def set_leverage(self, symbol: str, leverage: int) -> None:
@@ -59,7 +60,7 @@ class BinanceClient:
             symbol: Par de trading (exemplo: "BTCUSDT")
             leverage: Valor inteiro de alavancagem (exemplo: 5)
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         try:
@@ -78,7 +79,7 @@ class BinanceClient:
         Returns:
             Tuple[Optional[float], Optional[float]]: (tick_size, step_size), ou (None, None) se não encontrar.
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         try:
@@ -103,7 +104,7 @@ class BinanceClient:
         Returns:
             float: Último preço como float, ou 0.0 em caso de erro
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         try:
@@ -125,7 +126,7 @@ class BinanceClient:
         Returns:
             Optional[Dict[str, Any]]: Dicionário com informações da posição, ou None se não houver
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         try:
@@ -133,7 +134,7 @@ class BinanceClient:
             for pos in positions:
                 if (
                         pos["positionSide"].upper() == desired_side.upper()
-                        and float(pos["positionAmt"]) != 0.0
+                        and math.fabs(float(pos["positionAmt"])) > 1e-9  # Use a small epsilon value (1e-9)
                 ):
                     return pos
             return None
@@ -167,7 +168,7 @@ class BinanceClient:
         Returns:
             Optional[Dict[str, Any]]: Resposta da ordem (dict) ou None se falhar em todas as tentativas
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         attempt, backoff_time = 0, 2
@@ -179,7 +180,6 @@ class BinanceClient:
         current_price = await self.get_futures_last_price(symbol)
 
         # Calcular valor notional inicial
-        original_quantity = quantity
         formatted_qty = self.format_quantity_for_step_size(quantity, step_size)
         notional_value = float(formatted_qty) * current_price
 
@@ -254,7 +254,7 @@ class BinanceClient:
         Returns:
             Tuple[Optional[Dict], Optional[Dict]]: Tupla contendo (resposta_tp, resposta_sl)
         """
-        if not self._initialized:
+        if not self.is_client_initialized():
             raise RuntimeError("Cliente Binance não foi inicializado. Chame await initialize() primeiro.")
 
         tp_order, sl_order = None, None

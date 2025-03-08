@@ -29,16 +29,14 @@ class BinanceDataProvider(MarketDataProvider):
         """
         self.client = binance_client
         self.data_handler = data_handler
-        self._initialized = False
         self.min_candles_required = 100
 
     async def initialize(self) -> None:
         """
         Inicializa a conexão com a Binance e carrega os dados iniciais.
         """
-        if not self._initialized:
+        if not self.client.is_client_initialized():
             await self.client.initialize()
-            self._initialized = True
             logger.info("Provedor de dados Binance inicializado")
 
     async def get_latest_data(self) -> pd.DataFrame:

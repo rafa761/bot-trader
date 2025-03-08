@@ -8,10 +8,13 @@ from pathlib import Path
 import arrow
 import numpy as np
 import pandas as pd
-import ta
 from binance import Client
 from binance.exceptions import BinanceAPIException
 from pydantic import BaseModel, Field
+from ta.momentum import ROCIndicator, RSIIndicator, StochRSIIndicator, StochasticOscillator
+from ta.trend import ADXIndicator, EMAIndicator, MACD, PSARIndicator, SMAIndicator, WMAIndicator
+from ta.volatility import AverageTrueRange, BollingerBands
+from ta.volume import ChaikinMoneyFlowIndicator, OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
 
 from core.config import settings
 from core.constants import TRAIN_DATA_DIR
@@ -97,7 +100,7 @@ class DataHandler:
                 # Se o DataFrame estiver vazio, apenas adiciona o novo registro
                 if self.historical_df.empty:
                     self.historical_df = pd.DataFrame([new_row])
-                    logger.debug("Primeiro registro adicionado ao DataFrame histórico.")
+                    logger.info("Primeiro registro adicionado ao DataFrame histórico.")
                     return
 
                 # Adiciona a nova linha, remove duplicatas e ordena
@@ -204,7 +207,8 @@ class DataCollector:
             logger.error(f"Erro inesperado: {e}")
             return pd.DataFrame()
 
-    def _process_klines(self, klines: list) -> pd.DataFrame:
+    @staticmethod
+    def _process_klines(klines: list) -> pd.DataFrame:
         """Converte os dados da Binance para DataFrame."""
         df = pd.DataFrame(klines, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -267,10 +271,10 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    ema_windows: tuple[int, int] = (5, 15)  # Mais curtas para maior sensibilidade
+    ema_windows: tuple[int, int] = (3, 10)  # Mais curtas para maior sensibilidade
 
     # Hull Moving Average - excelente para day trading
-    hull_window: int = 9  # Reduzido para maior reatividade
+    hull_window: int = 7  # Reduzido para maior reatividade
 
     # Indicadores de volatilidade otimizados
     bollinger_window: int = 14  # Reduzido para maior sensibilidade
@@ -278,13 +282,13 @@ class TechnicalIndicatorConfig(BaseModel):
     atr_window: int = 10  # Reduzido para maior sensibilidade
 
     # Osciladores otimizados para day trading
-    rsi_window: int = 7  # Reduzido para maior sensibilidade
+    rsi_window: int = 5  # Reduzido para maior sensibilidade
     stoch_k_window: int = 7  # Reduzido para maior sensibilidade
     stoch_d_window: int = 3  # Mantido
     stoch_smooth_k: int = 2  # Menos suavização para maior reatividade
 
     # MACD otimizado para 15min
-    macd_windows: tuple[int, int, int] = (15, 7, 9)  # Ajustado para maior sensibilidade
+    macd_windows: tuple[int, int, int] = (12, 5, 7)  # Ajustado para maior sensibilidade
 
     # Outros indicadores otimizados
     vwap_window: int = 14  # Mantido
@@ -351,12 +355,12 @@ class TechnicalIndicatorAdder:
                 df['ha_low'] = df[['low', 'ha_open', 'ha_close']].min(axis=1)
 
             # Exponential Moving Average (EMA) ajustadas para day trading
-            df['ema_short'] = ta.trend.EMAIndicator(
+            df['ema_short'] = EMAIndicator(
                 close=df['close'],
                 window=config.ema_windows[0]
             ).ema_indicator()
 
-            df['ema_long'] = ta.trend.EMAIndicator(
+            df['ema_long'] = EMAIndicator(
                 close=df['close'],
                 window=config.ema_windows[1]
             ).ema_indicator()
@@ -366,13 +370,13 @@ class TechnicalIndicatorAdder:
             sqrt_window = int(np.sqrt(config.ema_windows[0]))
 
             # Passo 1: Calcular WMA com metade do período
-            wma_half = ta.trend.WMAIndicator(
+            wma_half = WMAIndicator(
                 close=df['close'],
                 window=half_window
             ).wma()
 
             # Passo 2: Calcular WMA com período completo
-            wma_full = ta.trend.WMAIndicator(
+            wma_full = WMAIndicator(
                 close=df['close'],
                 window=config.ema_windows[0]
             ).wma()
@@ -381,13 +385,13 @@ class TechnicalIndicatorAdder:
             df['raw_hma'] = 2 * wma_half - wma_full
 
             # Passo 4: Calcular WMA final com período sqrt
-            df['hma'] = ta.trend.WMAIndicator(
+            df['hma'] = WMAIndicator(
                 close=df['raw_hma'],
                 window=sqrt_window
             ).wma()
 
             # Parabolic SAR - Mais sensível para day trading
-            df['parabolic_sar'] = ta.trend.PSARIndicator(
+            df['parabolic_sar'] = PSARIndicator(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -397,7 +401,7 @@ class TechnicalIndicatorAdder:
 
             # SuperTrend - Excelente para identificar tendências em day trading
             # Cálculo do ATR para o SuperTrend
-            atr = ta.volatility.AverageTrueRange(
+            atr = AverageTrueRange(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -436,7 +440,7 @@ class TechnicalIndicatorAdder:
 
             ## Indicadores de Volatilidade
             # Bollinger Bands com ajustes para day trading
-            bollinger = ta.volatility.BollingerBands(
+            bollinger = BollingerBands(
                 close=df['close'],
                 window=config.bollinger_window,
                 window_dev=config.bollinger_std
@@ -448,7 +452,7 @@ class TechnicalIndicatorAdder:
             df['boll_pct_b'] = (df['close'] - df['boll_lband']) / (df['boll_hband'] - df['boll_lband'])
 
             # ATR para medir volatilidade - crítico para day trading
-            df['atr'] = ta.volatility.AverageTrueRange(
+            df['atr'] = AverageTrueRange(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -463,14 +467,14 @@ class TechnicalIndicatorAdder:
             df['squeeze'] = ((df['boll_width'] / df['boll_mavg']) < 0.1).astype(float)
 
             # TTM Squeeze momentum
-            df['ttm_squeeze'] = ta.momentum.ROCIndicator(
+            df['ttm_squeeze'] = ROCIndicator(
                 close=df['close'] - ((df['high'] + df['low']) / 2),
                 window=20
             ).roc()
 
             ## Indicadores de Momento
             # RSI otimizado para day trading (período menor)
-            df['rsi'] = ta.momentum.RSIIndicator(
+            df['rsi'] = RSIIndicator(
                 close=df['close'],
                 window=config.rsi_window
             ).rsi()
@@ -482,7 +486,7 @@ class TechnicalIndicatorAdder:
             df['rsi_divergence_bear'] = ((df['close'] > df['price_prev']) & (df['rsi'] < df['rsi_prev'])).astype(float)
 
             # Stochastic Oscillator ajustado para day trading
-            stoch = ta.momentum.StochasticOscillator(
+            stoch = StochasticOscillator(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -493,7 +497,7 @@ class TechnicalIndicatorAdder:
             df['stoch_d'] = df['stoch_k'].rolling(window=config.stoch_d_window).mean()
 
             # Stochastic RSI - hibridação útil para day trading
-            df['stoch_rsi'] = ta.momentum.StochRSIIndicator(
+            df['stoch_rsi'] = StochRSIIndicator(
                 close=df['close'],
                 window=config.rsi_window,
                 smooth1=3,
@@ -501,7 +505,7 @@ class TechnicalIndicatorAdder:
             ).stochrsi()
 
             # MACD otimizado para day trading
-            macd = ta.trend.MACD(
+            macd = MACD(
                 close=df['close'],
                 window_slow=config.macd_windows[0],
                 window_fast=config.macd_windows[1],
@@ -513,13 +517,13 @@ class TechnicalIndicatorAdder:
 
             ## Indicadores de Volume e Fluxo de Dinheiro
             # On-Balance Volume (OBV)
-            df['obv'] = ta.volume.OnBalanceVolumeIndicator(
+            df['obv'] = OnBalanceVolumeIndicator(
                 close=df['close'],
                 volume=df['volume']
             ).on_balance_volume()
 
             # Chaikin Money Flow - crucial para day trading
-            df['cmf'] = ta.volume.ChaikinMoneyFlowIndicator(
+            df['cmf'] = ChaikinMoneyFlowIndicator(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -528,7 +532,7 @@ class TechnicalIndicatorAdder:
             ).chaikin_money_flow()
 
             # Volume Weighted Average Price (VWAP) - essencial para day trading
-            df['vwap'] = ta.volume.VolumeWeightedAveragePrice(
+            df['vwap'] = VolumeWeightedAveragePrice(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -541,7 +545,7 @@ class TechnicalIndicatorAdder:
 
             ## Indicadores de Tendência e Direção
             # Average Directional Index (ADX) - mais sensível
-            adx = ta.trend.ADXIndicator(
+            adx = ADXIndicator(
                 high=df['high'],
                 low=df['low'],
                 close=df['close'],
@@ -612,7 +616,7 @@ class TechnicalIndicatorAdder:
             df.loc[df['atr_pct'] > 2.0, 'volatility_class'] = 'Extrema'
 
             # Classificação de volume (comparado com média móvel de volume)
-            df['volume_sma'] = ta.trend.SMAIndicator(close=df['volume'], window=20).sma_indicator()
+            df['volume_sma'] = SMAIndicator(close=df['volume'], window=20).sma_indicator()
             df['volume_ratio'] = df['volume'] / df['volume_sma']
 
             # Classificação como string em vez de categórica
@@ -773,7 +777,7 @@ class LabelCreator:
                 volatility_metric = df_result['atr_pct']
             else:
                 # Se não existir, calcular ATR percentual
-                atr = ta.volatility.AverageTrueRange(
+                atr = AverageTrueRange(
                     high=df_result['high'],
                     low=df_result['low'],
                     close=df_result['close'],
@@ -798,8 +802,8 @@ class LabelCreator:
                 market_phase = df_result['market_phase']
             else:
                 # Criar uma heurística simples para determinar fase do mercado
-                ema_short = ta.trend.EMAIndicator(close=df_result['close'], window=8).ema_indicator()
-                ema_long = ta.trend.EMAIndicator(close=df_result['close'], window=21).ema_indicator()
+                ema_short = EMAIndicator(close=df_result['close'], window=8).ema_indicator()
+                ema_long = EMAIndicator(close=df_result['close'], window=21).ema_indicator()
 
                 market_phase = pd.Series(0.0, index=df_result.index)  # 0: Range, 1: Alta, -1: Baixa
                 market_phase.loc[
@@ -824,7 +828,7 @@ class LabelCreator:
                     df_result.loc[df_result.index[i], 'used_horizon'] = horizon
 
             # 4. Calcular ATR para uso no ajuste dinâmico de SL
-            atr = ta.volatility.AverageTrueRange(
+            atr = AverageTrueRange(
                 high=df_result['high'],
                 low=df_result['low'],
                 close=df_result['close'],

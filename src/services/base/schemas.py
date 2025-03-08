@@ -1,10 +1,10 @@
 # services/base/schemas.py
 
 from datetime import datetime
-from typing import Literal, Any
+from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 rng = np.random.default_rng(seed=42)
 
@@ -30,29 +30,40 @@ class TradingSignal(BaseModel):
     current_price: float = Field(..., gt=0, description="Preço atual do ativo")
     tp_factor: float = Field(..., gt=0, description="Fator multiplicador para take profit")
     sl_factor: float = Field(..., gt=0, description="Fator multiplicador para stop loss")
-    mtf_trend: str | None = Field(None, description="Tendência consolidada multi-timeframe")
-    mtf_alignment: float | None = Field(None, ge=0.0, le=1.0, description="Score de alinhamento multi-timeframe")
-    mtf_confidence: float | None = Field(None, ge=0.0, le=1.0, description="Confiança na análise multi-timeframe")
-    mtf_details: dict[str, Any] | None = Field(None, description="Detalhes da análise multi-timeframe por timeframe")
-    atr_value: float | None = Field(None, description="Valor atual do ATR, se disponível")
-    entry_score: float | None = Field(None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
-    rr_ratio: float | None = Field(None, gt=0, description="Razão risco/recompensa calculada")
-    market_trend: str | None = Field(None, description="Tendência do mercado (UPTREND, DOWNTREND, NEUTRAL)")
-    market_strength: str | None = Field(None, description="Força da tendência (STRONG_TREND, WEAK_TREND)")
+    mtf_trend: str | None = Field(default=None, description="Tendência consolidada multi-timeframe")
+    mtf_alignment: float | None = Field(default=None, ge=0.0, le=1.0,
+                                        description="Score de alinhamento multi-timeframe")
+    mtf_confidence: float | None = Field(default=None, ge=0.0, le=1.0,
+                                         description="Confiança na análise multi-timeframe")
+    mtf_details: dict[str, Any] | None = Field(default=None,
+                                               description="Detalhes da análise multi-timeframe por timeframe")
+    atr_value: float | None = Field(default=None, description="Valor atual do ATR, se disponível")
+    entry_score: float | None = Field(default=None, ge=0, le=1, description="Pontuação de qualidade da entrada (0-1)")
+    rr_ratio: float | None = Field(default=None, gt=0, description="Razão risco/recompensa calculada")
+    market_trend: str | None = Field(default=None, description="Tendência do mercado (UPTREND, DOWNTREND, NEUTRAL)")
+    market_strength: str | None = Field(default=None, description="Força da tendência (STRONG_TREND, WEAK_TREND)")
     timestamp: datetime = Field(default_factory=datetime.now)
+
+    @field_validator('mtf_alignment', 'mtf_confidence', 'entry_score')
+    @classmethod
+    def limit_score_to_range(cls, value: float | None):
+        """ Limita a os campos a no máximo 1.0 """
+        if value is not None and isinstance(value, (int, float, np.number)):
+            return min(max(float(value), 0.0), 1.0)
+        return value
 
 
 class OrderResult(BaseModel):
     """Resultado da execução de uma ordem."""
     success: bool = Field(..., description="Se a ordem foi executada com sucesso")
-    order_id: str | None = Field(None, description="ID da ordem, se bem-sucedida")
-    error_message: str | None = Field(None, description="Mensagem de erro, se falhou")
+    order_id: str | None = Field(default=None, description="ID da ordem, se bem-sucedida")
+    error_message: str | None = Field(default=None, description="Mensagem de erro, se falhou")
 
 
 class TPSLResult(BaseModel):
     """Resultado da colocação de ordens TP/SL."""
-    tp_order: dict | None = Field(None, description="Resultado da ordem TP")
-    sl_order: dict | None = Field(None, description="Resultado da ordem SL")
+    tp_order: dict | None = Field(default=None, description="Resultado da ordem TP")
+    sl_order: dict | None = Field(default=None, description="Resultado da ordem SL")
 
 
 # Schemas para análise de mercado e estratégias
@@ -75,7 +86,7 @@ class MarketAnalysisResult(BaseModel):
     mtf_confidence: float = Field(..., description="Confiança na análise multi-timeframe, de 0.0 a 100.0")
     mtf_details: MultiTimeFrameDetails = Field(..., description="Detalhes completos da análise multi-timeframe")
     strategy_name: str = Field(..., description="Nome da estratégia selecionada com base na análise")
-    strategy: Any | None = Field(None,
+    strategy: Any | None = Field(default=None,
                                  description="Instância da estratégia selecionada ou None se nenhuma for aplicável")
 
 

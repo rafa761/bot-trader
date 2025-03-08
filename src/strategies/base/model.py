@@ -63,7 +63,7 @@ class IMarketStrategy(ABC):
         pass
 
     @abstractmethod
-    def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> "TradingSignal | None":
+    async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> "TradingSignal | None":
         """
         Gera um sinal de trading com base na estratégia.
 
@@ -140,28 +140,26 @@ class BaseStrategy(IMarketStrategy):
             return False
         return True
 
-    def calculate_trend_direction(self, df: pd.DataFrame) -> str:
-        """
-        Calcula a direção atual da tendência com base nas médias móveis.
-
-        Args:
-            df: DataFrame com os dados históricos
-
-        Returns:
-            str: "UPTREND", "DOWNTREND" ou "NEUTRAL"
-        """
+    @staticmethod
+    def calculate_trend_direction(df: pd.DataFrame) -> str:
         if 'ema_short' in df.columns and 'ema_long' in df.columns:
-            ema_short = df['ema_short'].iloc[-1]
-            ema_long = df['ema_long'].iloc[-1]
+            # Usar apenas as últimas 5 barras para determinar tendência
+            ema_short_recent = df['ema_short'].iloc[-5:]
+            ema_long_recent = df['ema_long'].iloc[-5:]
 
-            if ema_short > ema_long:
+            # Se a maior parte das barras recentes mostra uma tendência
+            up_count = sum(ema_short_recent > ema_long_recent)
+            down_count = sum(ema_short_recent < ema_long_recent)
+
+            if up_count >= 3:  # Maioria das barras recentes em uptrend
                 return "UPTREND"
-            elif ema_short < ema_long:
+            elif down_count >= 3:  # Maioria das barras recentes em downtrend
                 return "DOWNTREND"
 
         return "NEUTRAL"
 
-    def calculate_volatility_level(self, df: pd.DataFrame) -> float:
+    @staticmethod
+    def calculate_volatility_level(df: pd.DataFrame) -> float:
         """
         Calcula o nível de volatilidade atual com base no ATR percentual.
 
@@ -183,3 +181,18 @@ class BaseStrategy(IMarketStrategy):
             return max(0.0, min(1.0, volatility))
 
         return 0.5  # Valor padrão médio se ATR não estiver disponível
+
+    async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> "TradingSignal | None":
+        """
+        Implementação padrão do método generate_signal que retorna None.
+        Deve ser sobrescrito por estratégias concretas.
+
+        Args:
+            df: DataFrame com dados históricos
+            current_price: Preço atual
+            mtf_data: Dados multi-timeframe
+
+        Returns:
+            TradingSignal ou None
+        """
+        raise NotImplementedError("generate_signal method not implemented")

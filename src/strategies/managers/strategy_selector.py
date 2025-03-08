@@ -1,10 +1,9 @@
-# services/strategy_selector.py
+# services/managers/strategy_selector.py
 
 import pandas as pd
 
 from core.logger import logger
-from services.base.schemas import TradingSignal
-from strategies.base.model import BaseStrategy, IMarketStrategy, MarketCondition
+from strategies.base.model import IMarketStrategy, MarketCondition
 from strategies.downtrend_strategy import DowntrendStrategy
 from strategies.range_strategy import RangeStrategy
 from strategies.uptrend_strategy import UptrendStrategy
@@ -91,79 +90,6 @@ class StrategySelector:
             self.current_condition = selected_condition
 
         return selected_strategy
-
-    def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
-        """
-        Gera um sinal de trading usando a estratégia mais adequada.
-
-        Args:
-            df: DataFrame com dados históricos
-            current_price: Preço atual
-            mtf_data: Dados multi-timeframe
-
-        Returns:
-            Sinal de trading ou None
-        """
-        # Selecionar a estratégia mais adequada
-        strategy = self.select_strategy(df, mtf_data)
-        if strategy is None:
-            logger.warning("Nenhuma estratégia selecionada para gerar sinal")
-            return None
-
-        # Usar a estratégia para gerar um sinal
-        return strategy.generate_signal(df, current_price, mtf_data)
-
-    def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
-        """
-        Ajusta um sinal de trading usando a estratégia mais adequada.
-
-        Args:
-            signal: Sinal a ser ajustado
-            df: DataFrame com dados históricos
-            mtf_data: Dados multi-timeframe
-
-        Returns:
-            Sinal ajustado
-        """
-        # Selecionar a estratégia mais adequada
-        strategy = self.select_strategy(df, mtf_data)
-        if strategy is None:
-            logger.warning("Nenhuma estratégia selecionada para ajustar sinal, usando padrão")
-            strategy = self.strategies[MarketCondition.UPTREND]
-
-        # Usar a estratégia para ajustar o sinal
-        return strategy.adjust_signal(signal, df, mtf_data)
-
-    def register_custom_strategy(self, condition: MarketCondition, strategy_class: type[BaseStrategy]) -> None:
-        """
-        Registra uma estratégia personalizada para uma condição específica.
-
-        Args:
-            condition: Condição de mercado
-            strategy_class: Classe da estratégia personalizada
-        """
-        self.strategies[condition] = strategy_class()
-        self.strategy_list = list(self.strategies.values())
-        logger.info(f"Estratégia personalizada registrada para condição {condition}")
-
-    def get_active_strategies(self, df: pd.DataFrame, mtf_data: dict) -> list[IMarketStrategy]:
-        """
-        Retorna todas as estratégias que seriam ativadas nas condições atuais do mercado.
-        Útil para diagnóstico e testes.
-
-        Args:
-            df: DataFrame com dados históricos
-            mtf_data: Dados multi-timeframe
-
-        Returns:
-            Lista de estratégias ativas
-        """
-        active = []
-        for condition, strategy in self.strategies.items():
-            if strategy.should_activate(df, mtf_data):
-                active.append(strategy)
-
-        return active
 
     def get_current_strategy(self) -> IMarketStrategy | None:
         """

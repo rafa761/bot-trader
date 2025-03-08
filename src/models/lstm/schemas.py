@@ -44,9 +44,10 @@ class OptunaConfig(BaseModel):
     """
     enabled: bool = Field(True, description="Habilitar a tunagem de hiperparâmetros")
     n_trials: int = Field(30, gt=0, description="Número de trials para a otimização")
-    timeout: int | None = Field(None, description="Tempo máximo em segundos para a otimização (None para sem limite)")
+    timeout: int | None = Field(default=None,
+                                description="Tempo máximo em segundos para a otimização (None para sem limite)")
     study_name: str = Field("lstm_hyperparameter_study", description="Nome do estudo Optuna")
-    storage: str | None = Field(None,
+    storage: str | None = Field(default=None,
                                 description="Caminho para o storage do Optuna (None para armazenamento em memória)")
     direction: str = Field("minimize", description="Direção de otimização (minimize para loss)")
     metric: str = Field("val_loss", description="Métrica a ser otimizada")

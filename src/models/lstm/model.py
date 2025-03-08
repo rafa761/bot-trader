@@ -149,7 +149,7 @@ class LSTMModel(BaseModel):
                 logger.warning("Valores NaN detectados nos dados de entrada!")
                 input_data = np.nan_to_num(input_data, nan=0.0)
 
-            logger.debug(
+            logger.info(
                 f"Estatísticas do input: min={np.min(input_data)}, max={np.max(input_data)}, mean={np.mean(input_data)}")
 
             # Verificar se o input_data tem a forma correta
@@ -171,7 +171,7 @@ class LSTMModel(BaseModel):
             # Usar batch_size=1 para evitar problemas com previsões em lote
             predictions = self.model.predict(input_data, batch_size=1, verbose=1)
 
-            logger.debug(f"Previsões geradas: {predictions}")
+            logger.info(f"Previsões geradas: {predictions}")
 
             return predictions
         except Exception as e:

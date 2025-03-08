@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.preprocessing import RobustScaler, StandardScaler
 
 from core.logger import logger
 
@@ -173,7 +173,7 @@ class DataPreprocessor:
                             (df_processed[col] > upper_bound))
 
                 if outliers.sum() > 0:
-                    logger.info(f"Detectados {outliers.sum()} outliers na coluna {col}")
+                    # logger.info(f"Detectados {outliers.sum()} outliers na coluna {col}")
 
                     # Substituir outliers pela mediana
                     df_processed.loc[outliers, col] = self.original_stats[col]['median']
@@ -245,10 +245,10 @@ class DataPreprocessor:
 
         Args:
             df: DataFrame com dados históricos
-            sequence_length: Comprimento da sequência para o LSTM
+            sequence_length: Comprimento da sequência
 
         Returns:
-            Sequência formatada para o modelo LSTM
+            Sequência formatada para o modelo
         """
         if len(df) < sequence_length:
             logger.warning(
@@ -449,7 +449,7 @@ class DataPreprocessor:
                 # Último recurso: forçar conversão ou remover
                 try:
                     df_normalized[col] = df_normalized[col].astype(float)
-                except:
+                except Exception as e:
                     if col in df_normalized.columns:
                         logger.warning(f"Removendo coluna problemática: {col}")
                         df_normalized = df_normalized.drop(columns=[col])

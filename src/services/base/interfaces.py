@@ -6,7 +6,6 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.base.schemas import TradingSignal, OrderResult, ExecutedOrder
-    from services.performance_monitor import Trade, PerformanceMetrics
 
 
 class IOrderExecutor(ABC):
@@ -89,4 +88,39 @@ class IPerformanceMonitor(ABC):
     @abstractmethod
     def get_trades_dataframe(self) -> Any:  # Retorna um pandas.DataFrame
         """Converte todos os trades para um DataFrame do Pandas."""
+        pass
+
+
+class IOrderCalculator(ABC):
+    """
+    Interface para calculadores de parâmetros de ordem.
+    Responsável por cálculos relacionados às ordens.
+    """
+
+    @abstractmethod
+    def calculate_trade_quantity(
+            self,
+            capital: float,
+            current_price: float,
+            leverage: float,
+            risk_per_trade: float,
+            atr_value: float = None,
+            min_notional: float = 100.0
+    ) -> float:
+        """Calcula a quantidade a ser negociada."""
+        pass
+
+    @abstractmethod
+    def adjust_price_to_tick_size(self, price: float, tick_size: float) -> float:
+        """Ajusta o preço para o tick size."""
+        pass
+
+    @abstractmethod
+    def format_price_for_tick_size(self, price: float, tick_size: float) -> str:
+        """Formata o preço com base no tick size."""
+        pass
+
+    @abstractmethod
+    def adjust_quantity_to_step_size(self, qty: float, step_size: float) -> float:
+        """Ajusta a quantidade para o step size."""
         pass

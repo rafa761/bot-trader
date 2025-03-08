@@ -5,7 +5,7 @@ import pandas as pd
 from binance import Client
 
 from core.config import settings
-from core.constants import TRAINED_MODELS_DIR, FEATURE_COLUMNS
+from core.constants import FEATURE_COLUMNS, TRAINED_MODELS_DIR
 from core.logger import logger
 from models.lstm.model import LSTMModel
 from models.lstm.schemas import LSTMConfig, LSTMTrainingConfig, OptunaConfig
@@ -211,7 +211,11 @@ def collect_and_prepare_data():
         df_processed = full_preprocessor.process_dataframe(df_with_labels)
 
         logger.info(
-            f"Dados processados com sucesso. Tamanho final: {len(df_processed)} linhas, {len(df_processed.columns)} colunas")
+            f"Dados processados com sucesso. "
+            f"Tamanho final: {len(df_processed)} linhas, {len(df_processed.columns)} colunas"
+        )
+
+        data_collector.save_to_csv(df_processed)
 
         return df_processed
 
