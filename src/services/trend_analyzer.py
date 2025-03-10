@@ -191,9 +191,9 @@ class MultiTimeFrameTrendAnalyzer:
 
         # Definir pesos para cada timeframe
         self.tf_weights = {
-            TimeFrame.MINUTE_15: 0.50,  # Mais relevante
-            TimeFrame.HOUR_1: 0.30,  # Relevante, mas menos que 15m
-            TimeFrame.HOUR_4: 0.15,  # Contexto secundário
+            TimeFrame.MINUTE_15: 0.65,  # Mais relevante
+            TimeFrame.HOUR_1: 0.20,  # Relevante, mas menos que 15m
+            TimeFrame.HOUR_4: 0.10,  # Contexto secundário
             TimeFrame.DAY_1: 0.05  # Apenas contexto de longo prazo
         }
 
@@ -519,13 +519,33 @@ class MultiTimeFrameTrendAnalyzer:
         trend, confidence, details = await self.analyze_multi_timeframe_trend()
         trend_score = details['trend_score']
 
+        # Analisar apenas o timeframe de 15m para low-latency trading
+        tf_15m_score = 0
+        if '15m' in details['tf_summary']:
+            tf_15m_data = details['tf_summary']['15m']
+            if tf_15m_data['strength'] == 'STRONG_UPTREND' or tf_15m_data['strength'] == 'MODERATE_UPTREND':
+                tf_15m_score = 0.8  # Forte tendência de alta em 15m
+            elif tf_15m_data['strength'] == 'WEAK_UPTREND':
+                tf_15m_score = 0.6  # Tendência fraca de alta em 15m
+            elif tf_15m_data['strength'] == 'STRONG_DOWNTREND' or tf_15m_data['strength'] == 'MODERATE_DOWNTREND':
+                tf_15m_score = -0.8  # Forte tendência de baixa em 15m
+            elif tf_15m_data['strength'] == 'WEAK_DOWNTREND':
+                tf_15m_score = -0.6  # Tendência fraca de baixa em 15m
+            else:
+                tf_15m_score = 0  # Neutro
+
+        # Calcular alinhamento com mais peso para o timeframe de 15m
+        combined_score = trend_score * 0.5 + tf_15m_score * 0.5
+
         # Calcular alinhamento (-1 a 1, onde 1 é perfeitamente alinhado)
         if trade_direction == "LONG":
-            alignment = trend_score  # Já está na escala correta
+            alignment = combined_score  # Já está na escala correta
         else:  # SHORT
-            alignment = -trend_score  # Inverter para SHORT
+            alignment = -combined_score  # Inverter para SHORT
 
-        # Normalizar para 0-1
-        alignment_score = (alignment + 1) / 2
+        # Normalizar para 0-1 com um ligeiro boost para permitir mais trades
+        alignment_score = ((alignment + 1) / 2) * 1.1
+        # Limitar a 1.0 caso o boost exceda
+        alignment_score = min(alignment_score, 1.0)
 
         return alignment_score, confidence / 100  # confidence em 0-1

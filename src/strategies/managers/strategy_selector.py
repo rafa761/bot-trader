@@ -46,36 +46,47 @@ class StrategySelector:
             A estratégia selecionada ou None se nenhuma estratégia for adequada
         """
         # Verificar volatilidade primeiro (tem precedência)
-        if self.strategies[MarketCondition.HIGH_VOLATILITY].should_activate(df, mtf_data):
+        high_volatility = self.strategies[MarketCondition.HIGH_VOLATILITY].should_activate(df, mtf_data)
+        low_volatility = self.strategies[MarketCondition.LOW_VOLATILITY].should_activate(df, mtf_data)
+        uptrend = self.strategies[MarketCondition.UPTREND].should_activate(df, mtf_data)
+        downtrend = self.strategies[MarketCondition.DOWNTREND].should_activate(df, mtf_data)
+        range_market = self.strategies[MarketCondition.RANGE].should_activate(df, mtf_data)
+
+        # Lógica de decisão com prioridade e casos específicos
+        if high_volatility:
             selected_condition = MarketCondition.HIGH_VOLATILITY
             selected_strategy = self.strategies[selected_condition]
-
-        elif self.strategies[MarketCondition.LOW_VOLATILITY].should_activate(df, mtf_data):
+            logger.info(f"Alta volatilidade detectada - ativando estratégia específica")
+        elif low_volatility and (uptrend or downtrend):
+            # Em baixa volatilidade, se houver tendência, priorizar a estratégia de tendência
+            if uptrend:
+                selected_condition = MarketCondition.UPTREND
+            else:
+                selected_condition = MarketCondition.DOWNTREND
+            selected_strategy = self.strategies[selected_condition]
+            logger.info(f"Tendência em baixa volatilidade - priorizando estratégia de tendência")
+        elif low_volatility:
             selected_condition = MarketCondition.LOW_VOLATILITY
             selected_strategy = self.strategies[selected_condition]
-
-        # Depois verificar tendência
-        elif self.strategies[MarketCondition.UPTREND].should_activate(df, mtf_data):
+            logger.info(f"Baixa volatilidade detectada - ativando estratégia específica")
+        elif uptrend:
             selected_condition = MarketCondition.UPTREND
             selected_strategy = self.strategies[selected_condition]
-
-        elif self.strategies[MarketCondition.DOWNTREND].should_activate(df, mtf_data):
+        elif downtrend:
             selected_condition = MarketCondition.DOWNTREND
             selected_strategy = self.strategies[selected_condition]
-
-        # Por fim, verificar consolidação
-        elif self.strategies[MarketCondition.RANGE].should_activate(df, mtf_data):
+        elif range_market:
             selected_condition = MarketCondition.RANGE
             selected_strategy = self.strategies[selected_condition]
-
         else:
-            # Se nenhuma estratégia for ativada, manter a atual ou usar a de uptrend como padrão
+            # Se nenhuma estratégia for ativada, usar a de range como padrão
+            # (mais conservadora e adequada para mercados indefinidos)
             if self.current_strategy is not None:
                 logger.info("Mantendo estratégia atual, nenhuma nova condição detectada")
                 return self.current_strategy
 
-            logger.info("Nenhuma estratégia ativada, usando UPTREND como padrão")
-            selected_condition = MarketCondition.UPTREND
+            logger.info("Nenhuma estratégia ativada, usando RANGE como padrão")
+            selected_condition = MarketCondition.RANGE
             selected_strategy = self.strategies[selected_condition]
 
         # Verificar se houve mudança de estratégia
