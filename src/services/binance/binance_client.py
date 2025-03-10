@@ -33,7 +33,7 @@ class BinanceClient:
         if not self.is_client_initialized():
             logger.info("Iniciando client assíncrono da Binance...")
 
-            is_development = settings.BINANCE_ENVIRONMENT == "development"
+            is_development = settings.ENVIRONMENT == "development"
             binance_api_key = settings.BINANCE_API_KEY_TESTNET
             binance_api_secret = settings.BINANCE_API_SECRET_TESTNET
             if not is_development:
