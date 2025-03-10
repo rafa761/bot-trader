@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     ATR_MULTIPLIER: float = Field(1.3, description="Multiplicador do ATR para stops dinâmicos")
 
     # Parâmetros adicionais para day trading
-    VOLATILITY_HIGH_THRESHOLD: float = Field(1.5, description="Limite para considerar alta volatilidade (percentual)")
-    VOLATILITY_LOW_THRESHOLD: float = Field(0.4, description="Limite para considerar baixa volatilidade (percentual)")
+    VOLATILITY_HIGH_THRESHOLD: float = Field(1.2, description="Limite para considerar alta volatilidade (percentual)")
+    VOLATILITY_LOW_THRESHOLD: float = Field(0.5, description="Limite para considerar baixa volatilidade (percentual)")
     MAX_POSITION_SIZE_PCT: float = Field(0.30, description="Tamanho máximo da posição como percentual do capital")
 
     class Config:

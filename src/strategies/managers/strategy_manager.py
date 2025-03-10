@@ -27,8 +27,10 @@ class StrategyManager:
         self.last_mtf_data = {}
         self.last_strategy_name = "Nenhuma"
 
-    async def process_market_data(self, df: pd.DataFrame,
-                                  mtf_analyzer: MultiTimeFrameTrendAnalyzer) -> MarketAnalysisResult:
+    async def process_market_data(
+            self, df: pd.DataFrame,
+            mtf_analyzer: MultiTimeFrameTrendAnalyzer
+    ) -> MarketAnalysisResult:
         """
         Processa os dados de mercado, realizando análise multi-timeframe e selecionando a estratégia adequada.
 
@@ -97,10 +99,12 @@ class StrategyManager:
                 strategy=None
             )
 
-    async def evaluate_signal(self,
-                              signal: TradingSignal,
-                              df: pd.DataFrame,
-                              mtf_analyzer: MultiTimeFrameTrendAnalyzer) -> tuple[TradingSignal, bool]:
+    async def evaluate_signal(
+            self,
+            signal: TradingSignal,
+            df: pd.DataFrame,
+            mtf_analyzer: MultiTimeFrameTrendAnalyzer
+    ) -> tuple[TradingSignal, bool]:
         """
         Avalia e aprimora um sinal de trading usando a estratégia mais adequada.
         Centraliza toda a lógica de decisão e ajuste em um único lugar.
@@ -188,16 +192,25 @@ class StrategyManager:
 
                 # Verificar alinhamento com MTF se disponível
                 # Usar um alinhamento mínimo mais baixo para estratégias em alta volatilidade
-                min_alignment = 0.2 if config.name.startswith("High Volatility") else 0.3
+                min_alignment = 0.2 if config.name.startswith("High Volatility") else 0.25
                 if hasattr(signal, 'mtf_alignment') and signal.mtf_alignment is not None:
                     if signal.mtf_alignment < min_alignment:
-                        logger.info(
-                            f"Sinal rejeitado: baixo alinhamento MTF ({signal.mtf_alignment:.2f} < {min_alignment})"
-                        )
+                        # Exceção para mercados em range quando há baixa correlação entre timeframes
+                        if config.name == "Range Strategy" and self.last_mtf_data.get('confidence', 0) < 20:
+                            logger.info(
+                                f"Baixo alinhamento MTF ({signal.mtf_alignment:.2f}) "
+                                f"mas aceito em Range com baixa confiança MTF"
+                            )
+                        else:
+                            logger.info(
+                                f"Sinal rejeitado: "
+                                f"baixo alinhamento MTF ({signal.mtf_alignment:.2f} < {min_alignment})"
+                            )
                         return signal, False
                     else:
                         logger.info(
-                            f"Sinal aprovado: alinhamento MTF adequado ({signal.mtf_alignment:.2f} >= {min_alignment})"
+                            f"Sinal aprovado: "
+                            f"alinhamento MTF adequado ({signal.mtf_alignment:.2f} >= {min_alignment})"
                         )
 
                 # Se passou por todas as verificações, sinal aprovado
@@ -240,7 +253,6 @@ class StrategyManager:
         # Deixar a estratégia gerar o sinal
         signal = await strategy.generate_signal(df, current_price, self.last_mtf_data)
         return signal
-
 
     def get_strategy_details(self) -> StrategyDetails:
         """

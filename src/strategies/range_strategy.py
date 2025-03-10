@@ -29,11 +29,11 @@ class RangeStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Range Strategy",
             description="Estratégia otimizada para mercados laterais (em range)",
-            min_rr_ratio=1.1,
-            entry_threshold=0.50,
+            min_rr_ratio=1.05,
+            entry_threshold=0.40,
             tp_adjustment=0.85,
             sl_adjustment=0.8,
-            entry_aggressiveness=1.0,
+            entry_aggressiveness=1.2,
             max_sl_percent=1.0,
             min_tp_percent=0.3,
             required_indicators=[
@@ -522,8 +522,8 @@ class RangeStrategy(BaseStrategy):
         )
 
         # Percentual mínimo de condições e score mínimo
-        min_conditions_pct = 0.5  # Pelo menos 50% das condições
-        min_score = 0.5
+        min_conditions_pct = 0.35  # Pelo menos 35% das condições
+        min_score = 0.40
 
         # Verificar qual direção tem melhores condições e score
         short_conditions_met = sum(1 for c in short_conditions if c) / len(short_conditions)
