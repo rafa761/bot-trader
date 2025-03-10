@@ -61,14 +61,17 @@ class DataHandler:
         while attempt < max_attempts:
             try:
                 klines = await self.client.client.futures_klines(symbol=symbol, interval=interval, limit=limit)
-                df = pd.DataFrame(klines, columns=[
-                    "timestamp", "open", "high", "low", "close", "volume",
-                    "close_time", "quote_asset_volume", "number_of_trades",
-                    "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
-                ])
+                df = pd.DataFrame(
+                    klines, columns=[
+                        "timestamp", "open", "high", "low", "close", "volume",
+                        "close_time", "quote_asset_volume", "number_of_trades",
+                        "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"
+                    ]
+                )
                 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
                 df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(
-                    float)
+                    float
+                )
                 df.dropna(inplace=True)
                 df.reset_index(drop=True, inplace=True)
                 return df[["timestamp", "open", "high", "low", "close", "volume"]]
@@ -88,6 +91,7 @@ class DataHandler:
 
         logger.error("Tentativas esgotadas. Não foi possível coletar dados.")
         return pd.DataFrame()
+
     def update_historical_data(self, new_row: dict) -> None:
         """
         Atualiza o DataFrame histórico com uma nova linha e recalcula indicadores
@@ -175,9 +179,11 @@ class DataCollector:
                     df = df[['open', 'high', 'low', 'close', 'volume']]
                 return df
 
-            logger.info(f"Coletando dados para {self.config.symbol} - "
-                        f"Intervalo: {self.config.interval} - "
-                        f"Início: {self.config.start_str}")
+            logger.info(
+                f"Coletando dados para {self.config.symbol} - "
+                f"Intervalo: {self.config.interval} - "
+                f"Início: {self.config.start_str}"
+            )
 
             klines = self.client.get_historical_klines(
                 self.config.symbol,
@@ -210,11 +216,13 @@ class DataCollector:
     @staticmethod
     def _process_klines(klines: list) -> pd.DataFrame:
         """Converte os dados da Binance para DataFrame."""
-        df = pd.DataFrame(klines, columns=[
-            'timestamp', 'open', 'high', 'low', 'close', 'volume',
-            'close_time', 'quote_asset_volume', 'number_of_trades',
-            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-        ])
+        df = pd.DataFrame(
+            klines, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ]
+        )
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
 
@@ -631,8 +639,10 @@ class TechnicalIndicatorAdder:
             df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
             # Remover colunas temporárias e auxiliares
-            df.drop(['raw_hma', 'rsi_prev', 'price_prev'],
-                    axis=1, errors='ignore', inplace=True)
+            df.drop(
+                ['raw_hma', 'rsi_prev', 'price_prev'],
+                axis=1, errors='ignore', inplace=True
+            )
 
             # Preencher NaN com forward fill e depois com backward fill
             # Usando sintaxe moderna recomendada
@@ -654,52 +664,79 @@ class TechnicalIndicatorAdder:
             logger.error(f"Erro ao adicionar indicadores técnicos: {e}", exc_info=True)
             return df
 
+
 class LabelConfig(BaseModel):
     """Configuração otimizada para criação de labels em day trading de 15 minutos"""
     # Horizonte baseado na configuração existente
-    base_horizon: int = Field(6, gt=0,
-                              description="Horizonte de previsão base em períodos (do settings)")
-    min_horizon: int = Field(4, gt=0,
-                             description="Horizonte mínimo para mercados voláteis")
-    max_horizon: int = Field(10, gt=0,
-                             description="Horizonte máximo para mercados lentos")
+    base_horizon: int = Field(
+        6, gt=0,
+        description="Horizonte de previsão base em períodos (do settings)"
+    )
+    min_horizon: int = Field(
+        4, gt=0,
+        description="Horizonte mínimo para mercados voláteis"
+    )
+    max_horizon: int = Field(
+        10, gt=0,
+        description="Horizonte máximo para mercados lentos"
+    )
 
     # Configurações de movimento de preço
     min_price_move: float = Field(0.35, description="Movimento mínimo percentual para considerar sinal")
 
     # Take profit e stop loss
-    base_rr_ratio: float = Field(1.5,
-                                 description="Razão base entre take profit e stop loss (do settings)")
-    trend_rr_ratio: float = Field(2.0,
-                                  description="Razão R:R otimizada para mercados em tendência")
-    range_rr_ratio: float = Field(1.2,
-                                  description="Razão R:R otimizada para mercados em range")
+    base_rr_ratio: float = Field(
+        1.5,
+        description="Razão base entre take profit e stop loss (do settings)"
+    )
+    trend_rr_ratio: float = Field(
+        2.0,
+        description="Razão R:R otimizada para mercados em tendência"
+    )
+    range_rr_ratio: float = Field(
+        1.2,
+        description="Razão R:R otimizada para mercados em range"
+    )
 
     # ATR para stops dinâmicos
-    atr_sl_multiplier: float = Field(1.5,
-                                     description="Multiplicador do ATR para stop loss (do settings)")
+    atr_sl_multiplier: float = Field(
+        1.5,
+        description="Multiplicador do ATR para stop loss (do settings)"
+    )
 
     # Take profit parcial
-    tp_levels: list[float] = Field([0.382, 0.618, 1.0],
-                                   description="Níveis de take profit (% do alvo total)")
-    partial_tp_weights: list[float] = Field([0.3, 0.4, 0.3],
-                                            description="Pesos para cada nível de TP")
+    tp_levels: list[float] = Field(
+        [0.382, 0.618, 1.0],
+        description="Níveis de take profit (% do alvo total)"
+    )
+    partial_tp_weights: list[float] = Field(
+        [0.3, 0.4, 0.3],
+        description="Pesos para cada nível de TP"
+    )
 
     # Qualificadores de trade
     max_sl_pct: float = Field(1.5, description="Máximo stop loss percentual para day trading")
     min_tp_pct: float = Field(0.5, description="Mínimo take profit percentual para day trading")
 
     # Ajuste dos limiares de qualidade baseados nas configurações existentes
-    quality_threshold: float = Field(0.6,
-                                     description="Limiar de qualidade para considerar um trade válido")
+    quality_threshold: float = Field(
+        0.6,
+        description="Limiar de qualidade para considerar um trade válido"
+    )
 
     # Flags de condição de mercado
-    trend_aligned_bonus: float = Field(0.2,
-                                       description="Bônus de qualidade para trades alinhados com a tendência")
-    counter_trend_penalty: float = Field(0.3,
-                                         description="Penalidade para trades contra a tendência")
-    volatility_adjustment: float = Field(0.15,
-                                         description="Ajuste para condições de volatilidade")
+    trend_aligned_bonus: float = Field(
+        0.2,
+        description="Bônus de qualidade para trades alinhados com a tendência"
+    )
+    counter_trend_penalty: float = Field(
+        0.3,
+        description="Penalidade para trades contra a tendência"
+    )
+    volatility_adjustment: float = Field(
+        0.15,
+        description="Ajuste para condições de volatilidade"
+    )
 
     class Config:
         """Configuração adicional do modelo Pydantic"""
@@ -771,170 +808,109 @@ class LabelCreator:
             # Cópia do DataFrame para evitar modificações no original
             df_result = df.copy()
 
-            # 1. Determinar o horizonte adaptativo baseado em volatilidade e fase do mercado
-            # Calcular a volatilidade relativa (usando ATR percentual ou similar se disponível)
-            if 'atr_pct' in df_result.columns:
-                volatility_metric = df_result['atr_pct']
-            else:
-                # Se não existir, calcular ATR percentual
+            # Usar horizonte fixo para consistência e simplicidade
+            horizon = int(config.base_horizon)
+
+            # 1. Calcular máximos e mínimos futuros com horizonte fixo
+            df_result['future_high'] = np.nan
+            df_result['future_low'] = np.nan
+            df_result['used_horizon'] = horizon
+
+            # Calcular máximos e mínimos futuros para cada ponto com verificação adequada de limites
+            for i in range(len(df_result) - horizon):
+                if i + horizon < len(df_result):
+                    df_result.loc[df_result.index[i], 'future_high'] = df_result['high'].iloc[
+                                                                       i + 1:i + 1 + horizon].max()
+                    df_result.loc[df_result.index[i], 'future_low'] = df_result['low'].iloc[i + 1:i + 1 + horizon].min()
+
+            # 2. Calcular TP/SL percentuais básicos
+            df_result['raw_tp_pct'] = ((df_result['future_high'] - df_result['close']) / df_result['close']) * 100
+            df_result['raw_sl_pct'] = ((df_result['close'] - df_result['future_low']) / df_result['close']) * 100
+
+            # 3. Obter ATR para referência de volatilidade
+            if 'atr' not in df_result.columns:
                 atr = AverageTrueRange(
                     high=df_result['high'],
                     low=df_result['low'],
                     close=df_result['close'],
                     window=14
                 ).average_true_range()
-                volatility_metric = (atr / df_result['close']) * 100
-
-            # Normalizar a volatilidade numa escala de 0 a 1
-            vol_min, vol_max = volatility_metric.quantile(0.05), volatility_metric.quantile(0.95)
-            norm_volatility = (volatility_metric - vol_min) / (vol_max - vol_min)
-            norm_volatility = norm_volatility.clip(0, 1)
-
-            # Ajustar horizonte baseado em volatilidade (mais curto quando volátil, mais longo quando calmo)
-            # Fórmula: horizonte = máximo - (máximo - mínimo) * volatilidade_normalizada
-            # Garantir que config.max_horizon e config.min_horizon são inteiros, não funções
-            max_h = int(config.max_horizon)
-            min_h = int(config.min_horizon)
-            adaptive_horizon = (max_h - ((max_h - min_h) * norm_volatility)).astype(int)
-
-            # 2. Detectar fase do mercado (se 'market_phase' estiver disponível nos indicadores)
-            if 'market_phase' in df_result.columns:
-                market_phase = df_result['market_phase']
             else:
-                # Criar uma heurística simples para determinar fase do mercado
-                ema_short = EMAIndicator(close=df_result['close'], window=8).ema_indicator()
-                ema_long = EMAIndicator(close=df_result['close'], window=21).ema_indicator()
+                atr = df_result['atr']
 
-                market_phase = pd.Series(0.0, index=df_result.index)  # 0: Range, 1: Alta, -1: Baixa
-                market_phase.loc[
-                    (ema_short > ema_long) & (ema_short.shift(3) < ema_long.shift(3))] = 1.0  # Tendência de alta
-                market_phase.loc[
-                    (ema_short < ema_long) & (ema_short.shift(3) > ema_long.shift(3))] = -1.0  # Tendência de baixa
+            # ATR como percentual do preço para melhor escalabilidade
+            atr_pct = (atr / df_result['close']) * 100
 
-            # 3. Calcular futuros máximos e mínimos para cada barra (usando horizonte adaptativo)
-            df_result['future_high'] = np.nan
-            df_result['future_low'] = np.nan
-            df_result['used_horizon'] = np.nan
+            # 4. Definir limites realistas para TP e SL baseados na realidade do mercado
+            # - TP máximo: 5%
+            # - TP mínimo: ATR% ou 0.25% (o que for maior)
+            # - SL máximo: 3%
+            # - SL mínimo: 0.5 * ATR% ou 0.15% (o que for maior)
 
-            # Para cada linha, calculamos o futuro máximo e mínimo baseado no horizonte adaptativo
-            for i in range(len(df_result) - max_h):
-                horizon = adaptive_horizon.iloc[i]
-                horizon = max(horizon, min_h)  # Garantir que não seja menor que o mínimo
+            # Aplicar limites para TP
+            max_tp_pct = 5.0  # Máximo 5% para take profit
+            min_tp_pct = np.maximum(atr_pct, 0.25)  # No mínimo ATR% ou 0.25%
 
-                if i + horizon < len(df_result):
-                    df_result.loc[df_result.index[i], 'future_high'] = df_result['high'].iloc[
-                                                                       i + 1:i + 1 + horizon].max()
-                    df_result.loc[df_result.index[i], 'future_low'] = df_result['low'].iloc[i + 1:i + 1 + horizon].min()
-                    df_result.loc[df_result.index[i], 'used_horizon'] = horizon
+            df_result['take_profit_pct'] = np.clip(df_result['raw_tp_pct'], min_tp_pct, max_tp_pct)
 
-            # 4. Calcular ATR para uso no ajuste dinâmico de SL
-            atr = AverageTrueRange(
-                high=df_result['high'],
-                low=df_result['low'],
-                close=df_result['close'],
-                window=14
-            ).average_true_range()
+            # Aplicar limites para SL
+            max_sl_pct = 3.0  # Máximo 3% para stop loss
+            min_sl_pct = np.maximum(atr_pct * 0.5, 0.15)  # No mínimo metade do ATR% ou 0.15%
 
-            # 5. Calcular take profit e stop loss percentuais básicos
-            df_result['raw_tp_pct'] = ((df_result['future_high'] - df_result['close']) / df_result['close']) * 100
-            df_result['raw_sl_pct'] = ((df_result['close'] - df_result['future_low']) / df_result['close']) * 100
+            df_result['stop_loss_pct'] = np.clip(df_result['raw_sl_pct'], min_sl_pct, max_sl_pct)
 
-            # 6. Calcular stop loss dinâmico baseado em ATR e ajustado para fase do mercado
-            # Usar ATR maior para mercados voláteis, menor para range
-            df_result['atr_sl_pct'] = (atr / df_result['close']) * 100 * config.atr_sl_multiplier
+            # 5. Remover outliers estatísticos adicionais
+            for col in ['take_profit_pct', 'stop_loss_pct']:
+                q1 = df_result[col].quantile(0.25)
+                q3 = df_result[col].quantile(0.75)
+                iqr = q3 - q1
+                lower_bound = max(q1 - 1.5 * iqr, 0.15)  # Nunca menor que 0.15%
+                upper_bound = min(q3 + 1.5 * iqr, 5.0)  # Nunca maior que 5%
 
-            # Ajustar SL baseado na fase do mercado
-            trend_factor = pd.Series(1.0, index=df_result.index)
-            trend_factor.loc[market_phase == 1] = 0.8  # Reduzir SL em tendência de alta (mais confiança)
-            trend_factor.loc[market_phase == -1] = 0.8  # Reduzir SL em tendência de baixa (mais confiança)
-            trend_factor.loc[market_phase == 0] = 1.2  # Aumentar SL em range (menos confiança)
+                # Aplicar clipping
+                df_result[col] = df_result[col].clip(lower_bound, upper_bound)
 
-            df_result['atr_sl_pct'] = df_result['atr_sl_pct'] * trend_factor
-
-            # 7. Usar o menor entre o SL baseado em preço futuro e o SL baseado em ATR, com teto máximo
-            df_result['stop_loss_pct'] = df_result[['raw_sl_pct', 'atr_sl_pct']].min(axis=1)
-            df_result['stop_loss_pct'] = df_result['stop_loss_pct'].clip(upper=config.max_sl_pct)
-
-            # 8. Ajustar o take profit baseado na fase do mercado para garantir razão R:R adequada
-            # Usar R:R maior para tendências, menor para range
-            rr_ratio = pd.Series(config.base_rr_ratio, index=df_result.index)
-            rr_ratio.loc[market_phase == 1] = config.trend_rr_ratio  # Maior R:R em tendência de alta
-            rr_ratio.loc[market_phase == -1] = config.trend_rr_ratio  # Maior R:R em tendência de baixa
-            rr_ratio.loc[market_phase == 0] = config.range_rr_ratio  # Menor R:R em range
-
-            # Take profit baseado no R:R e no movimento mínimo requerido
-            df_result['min_tp_by_rr'] = df_result['stop_loss_pct'] * rr_ratio
-            df_result['min_tp_required'] = config.min_tp_pct
-
-            # Tomar o maior entre: TP original, TP mínimo por R:R, movimento mínimo requerido
-            df_result['take_profit_pct'] = df_result[['raw_tp_pct', 'min_tp_by_rr', 'min_tp_required']].max(axis=1)
-
-            # 9. Calcular níveis de take profit parcial
-            for i, level in enumerate(config.tp_levels):
-                df_result[f'tp_level_{i + 1}_pct'] = df_result['take_profit_pct'] * level
-                df_result[f'tp_level_{i + 1}_weight'] = config.partial_tp_weights[i]
-
-            # 10. Adicionar features de relação entre take profit e stop loss
+            # 6. Calcular razão TP/SL (R:R) com limites razoáveis
             df_result['tp_sl_ratio'] = df_result['take_profit_pct'] / df_result['stop_loss_pct']
+            df_result['tp_sl_ratio'] = df_result['tp_sl_ratio'].clip(0.5, 5.0)
 
-            # 11. Adicionar sinalizador de qualidade de trade com múltiplos fatores
-            # Base de qualidade - composto por R:R e tamanho mínimo de movimento
-            base_quality = ((df_result['tp_sl_ratio'] > config.base_rr_ratio) &
-                            (df_result['take_profit_pct'] > config.min_tp_pct) &
-                            (df_result['stop_loss_pct'] < config.max_sl_pct)).astype(float)
+            # 7. Gerar sinais de trade baseados em critérios de R:R
+            min_rr = config.base_rr_ratio
+            df_result['trade_quality'] = np.where(df_result['tp_sl_ratio'] >= min_rr, 0.7, 0.3)
+            df_result['trade_signal'] = np.where(df_result['tp_sl_ratio'] >= min_rr, 1, 0)
 
-            # Ajuste baseado na fase do mercado
-            trend_alignment = pd.Series(0.0, index=df_result.index)
+            # 8. Criar sinais direcionais (long/short) baseados em qual movimento é mais forte
+            df_result['long_signal'] = (
+                    (df_result['trade_signal'] == 1) &
+                    (df_result['raw_tp_pct'] > df_result['raw_sl_pct'])
+            ).astype(float)
+            df_result['short_signal'] = (
+                    (df_result['trade_signal'] == 1) &
+                    (df_result['raw_tp_pct'] < df_result['raw_sl_pct'])
+            ).astype(float)
 
-            # Tendência de alta: premiar compras, penalizar vendas
-            trend_alignment.loc[
-                (market_phase == 1) & (df_result['raw_tp_pct'] > df_result['raw_sl_pct'])] += config.trend_aligned_bonus
-            trend_alignment.loc[(market_phase == 1) & (
-                    df_result['raw_tp_pct'] < df_result['raw_sl_pct'])] -= config.counter_trend_penalty
-
-            # Tendência de baixa: premiar vendas, penalizar compras
-            trend_alignment.loc[(market_phase == -1) & (
-                    df_result['raw_tp_pct'] < df_result['raw_sl_pct'])] += config.trend_aligned_bonus
-            trend_alignment.loc[(market_phase == -1) & (
-                    df_result['raw_tp_pct'] > df_result['raw_sl_pct'])] -= config.counter_trend_penalty
-
-            # Ajuste baseado na volatilidade
-            volatility_adjustment = (norm_volatility - 0.5) * config.volatility_adjustment
-
-            # Qualidade final do trade (0 a 1)
-            df_result['trade_quality_raw'] = base_quality + trend_alignment + volatility_adjustment
-            df_result['trade_quality'] = df_result['trade_quality_raw'].clip(0, 1)
-
-            # 12. Gerar sinal binário baseado no limiar de qualidade
-            df_result['trade_signal'] = (df_result['trade_quality'] > config.quality_threshold).astype(float)
-
-            # 13. Gerar sinais de direção
-            df_result['long_signal'] = ((df_result['trade_signal'] == 1) &
-                                        (df_result['raw_tp_pct'] > df_result['raw_sl_pct'])).astype(float)
-            df_result['short_signal'] = ((df_result['trade_signal'] == 1) &
-                                         (df_result['raw_tp_pct'] < df_result['raw_sl_pct'])).astype(float)
-
-            # 14. Adicionar flag para alinhamento com tendência maior (para filtro adicional)
+            # 9. Adicionar alinhamento com supertrend se disponível
             if 'supertrend_direction' in df_result.columns:
                 df_result['aligned_with_supertrend'] = (
                         (df_result['long_signal'] == 1) & (df_result['supertrend_direction'] == 1) |
-                        (df_result['short_signal'] == 1) & (df_result['supertrend_direction'] == -1)).astype(float)
+                        (df_result['short_signal'] == 1) & (df_result['supertrend_direction'] == -1)
+                ).astype(float)
 
-            # 15. Limpar valores infinitos e NaN
+            # 10. Limpar valores infinitos, NaN e colunas temporárias
             df_result.replace([np.inf, -np.inf], np.nan, inplace=True)
+            df_result.drop(['raw_tp_pct', 'raw_sl_pct'], axis=1, errors='ignore', inplace=True)
 
-            # 16. Remover colunas temporárias
-            tmp_cols = ['raw_tp_pct', 'raw_sl_pct', 'atr_sl_pct', 'min_tp_by_rr', 'min_tp_required',
-                        'trade_quality_raw']
-            df_result.drop(tmp_cols, axis=1, errors='ignore', inplace=True)
+            # Preencher NaN com forward fill e depois com backward fill
+            df_result = df_result.ffill().bfill()
 
             # Estatísticas de qualidade
-            valid_data = df_result.dropna(subset=['trade_quality'])
+            valid_data = df_result.dropna(subset=['take_profit_pct', 'stop_loss_pct'])
             if not valid_data.empty:
-                avg_quality = valid_data['trade_quality'].mean()
+                avg_tp = valid_data['take_profit_pct'].mean()
+                avg_sl = valid_data['stop_loss_pct'].mean()
                 median_ratio = valid_data['tp_sl_ratio'].median()
                 signal_pct = valid_data['trade_signal'].mean() * 100
-                logger.info(f"Qualidade média dos trades: {avg_quality:.2f}, Razão R:R mediana: {median_ratio:.2f}")
+                logger.info(f"TP médio: {avg_tp:.2f}%, SL médio: {avg_sl:.2f}%, Razão R:R mediana: {median_ratio:.2f}")
                 logger.info(f"Percentual de sinais gerados: {signal_pct:.2f}%")
 
                 if 'aligned_with_supertrend' in valid_data.columns:
@@ -975,8 +951,19 @@ class LabelCreator:
         horizon = settings.MODEL_DATA_PREDICTION_HORIZON
 
         # Calcular futuros máximos e mínimos
-        df_result['future_high'] = df_result['high'].rolling(window=horizon).max().shift(-horizon)
-        df_result['future_low'] = df_result['low'].rolling(window=horizon).min().shift(-horizon)
+        future_high = []
+        future_low = []
+
+        for i in range(len(df_result)):
+            if i + horizon < len(df_result):
+                future_high.append(df_result['high'].iloc[i + 1:i + 1 + horizon].max())
+                future_low.append(df_result['low'].iloc[i + 1:i + 1 + horizon].min())
+            else:
+                future_high.append(np.nan)
+                future_low.append(np.nan)
+
+        df_result['future_high'] = future_high
+        df_result['future_low'] = future_low
 
         # Calcular take profit e stop loss percentuais
         df_result['take_profit_pct'] = ((df_result['future_high'] - df_result['close']) / df_result['close']) * 100
@@ -986,11 +973,25 @@ class LabelCreator:
         df_result['tp_sl_ratio'] = df_result['take_profit_pct'] / df_result['stop_loss_pct']
 
         # Remover valores infinitos e NaN
+        df_result['raw_tp_pct'] = ((df_result['future_high'] - df_result['close']) / df_result['close']) * 100
+        df_result['raw_sl_pct'] = ((df_result['close'] - df_result['future_low']) / df_result['close']) * 100
+
+        # Aplicar limites razoáveis
+        df_result['take_profit_pct'] = df_result['raw_tp_pct'].clip(0.25, 5.0)
+        df_result['stop_loss_pct'] = df_result['raw_sl_pct'].clip(0.15, 3.0)
+
+        # Calcular razão R:R
+        df_result['tp_sl_ratio'] = (df_result['take_profit_pct'] / df_result['stop_loss_pct']).clip(0.5, 5.0)
+
+        # Remover valores infinitos e NaN
         df_result.replace([np.inf, -np.inf], np.nan, inplace=True)
-        df_result.dropna(subset=['take_profit_pct', 'stop_loss_pct'], inplace=True)
+        df_result = df_result.ffill().bfill()
 
         # Remover colunas temporárias
-        df_result.drop(['future_high', 'future_low'], axis=1, errors='ignore', inplace=True)
+        df_result.drop(
+            ['raw_tp_pct', 'raw_sl_pct', 'future_high', 'future_low'],
+            axis=1, errors='ignore', inplace=True
+        )
 
         logger.info("Labels simples criados com sucesso.")
 
