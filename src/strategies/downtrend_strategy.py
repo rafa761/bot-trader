@@ -324,7 +324,7 @@ class DowntrendStrategy(BaseStrategy):
                 timestamp=datetime.now(),
                 # Campos adicionais para gerenciamento de risco avançado
                 mtf_trend="DOWNTREND",
-                mtf_confidence=mtf_strength * 100 if mtf_strength else None,
+                mtf_confidence=mtf_strength if mtf_strength else None,
                 mtf_alignment=mtf_strength if mtf_strength else None,
                 mtf_details={
                     'entry_conditions_score': entry_conditions_score,
