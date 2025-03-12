@@ -199,6 +199,7 @@ class BinanceOrderExecutor(IOrderExecutor):
             )
 
             # Ajusta quantidade
+            logger.info(f"Quantidade calculada: {qty}. Step size: {self.step_size}")
             qty_adj = self.order_calculator.adjust_quantity_to_step_size(qty, self.step_size)
             if qty_adj <= 0:
                 logger.warning("Qty ajustada <= 0. Trade abortado.")

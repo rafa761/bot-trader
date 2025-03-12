@@ -23,21 +23,21 @@ class Settings(BaseSettings):
         "1 Jan, 2020",
                                                 description="Data de inicio para treino dos modelos de machine learning")
     MODEL_DATA_PREDICTION_HORIZON: int = Field(6, description="Quantos períodos de previsão do modelo")
-    CAPITAL: float = Field(1000.0, description="Capital disponível para trade")
+    CAPITAL: float = Field(100.0, description="Capital disponível para trade")
     LEVERAGE: int = Field(5, description="Alavancagem utilizada")
     RISK_PER_TRADE: float = Field(0.02, description="Percentual de risco por trade (ex: 0.02 para 2%)")
 
     # Novos parâmetros para thresholds de entrada
-    ENTRY_THRESHOLD_DEFAULT: float = Field(0.60, description="Threshold padrão para qualidade de entrada")
+    ENTRY_THRESHOLD_DEFAULT: float = Field(0.65, description="Threshold padrão para qualidade de entrada")
 
     # Novos parâmetros para risk/reward
-    MIN_RR_RATIO: float = Field(1.25, description="Razão mínima entre take profit e stop loss")
-    ATR_MULTIPLIER: float = Field(1.3, description="Multiplicador do ATR para stops dinâmicos")
+    MIN_RR_RATIO: float = Field(1.5, description="Razão mínima entre take profit e stop loss")
+    ATR_MULTIPLIER: float = Field(1.5, description="Multiplicador do ATR para stops dinâmicos")
 
     # Parâmetros adicionais para day trading
     VOLATILITY_HIGH_THRESHOLD: float = Field(1.2, description="Limite para considerar alta volatilidade (percentual)")
     VOLATILITY_LOW_THRESHOLD: float = Field(0.5, description="Limite para considerar baixa volatilidade (percentual)")
-    MAX_POSITION_SIZE_PCT: float = Field(0.30, description="Tamanho máximo da posição como percentual do capital")
+    MAX_POSITION_SIZE_PCT: float = Field(0.10, description="Tamanho máximo da posição como percentual do capital")
 
     class Config:
         env_file = ".env"

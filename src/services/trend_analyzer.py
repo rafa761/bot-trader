@@ -184,16 +184,16 @@ class MultiTimeFrameTrendAnalyzer:
         self.symbol = symbol
         self.timeframes = [
             TimeFrame.MINUTE_15,
-            TimeFrame.HOUR_1,
+            # TimeFrame.HOUR_1,
             TimeFrame.HOUR_4,
             TimeFrame.DAY_1
         ]
 
         # Definir pesos para cada timeframe
         self.tf_weights = {
-            TimeFrame.MINUTE_15: 0.65,  # Mais relevante
-            TimeFrame.HOUR_1: 0.20,  # Relevante, mas menos que 15m
-            TimeFrame.HOUR_4: 0.10,  # Contexto secundário
+            TimeFrame.MINUTE_15: 0.70,  # Mais relevante
+            # TimeFrame.HOUR_1: 0.20,  # Relevante, mas menos que 15m
+            TimeFrame.HOUR_4: 0.25,  # Contexto secundário
             TimeFrame.DAY_1: 0.05  # Apenas contexto de longo prazo
         }
 
