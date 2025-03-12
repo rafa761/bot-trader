@@ -877,6 +877,78 @@ class TrendPatternAnalyzer(TechnicalPatternAnalyzer):
 
         return False, 0.0
 
+    def is_invalidation_pattern(self, df: pd.DataFrame, signal_direction: str) -> bool:
+        """
+        Verifica se existe padrão de invalidação para a direção do sinal.
+
+        Args:
+            df: DataFrame com dados históricos
+            signal_direction: "LONG" ou "SHORT"
+
+        Returns:
+            bool: True se um padrão de invalidação for detectado
+        """
+        if len(df) < 3:
+            return False
+
+        if signal_direction == "SHORT":
+            # Verifica padrão de reversão de baixa (hammer, engulfing bullish, etc)
+            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
+            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
+            h0, l0 = df['high'].iloc[-1], df['low'].iloc[-1]
+
+            # Hammer/Doji com sombra inferior longa
+            lower_wick = min(o0, c0) - l0
+            body_size = abs(c0 - o0)
+            if (lower_wick > body_size * 2) and (c0 > o0):
+                logger.warning("Padrão de invalidação SHORT: Hammer/Doji detectado")
+                return True
+
+            # Bullish engulfing
+            if (c1 < o1) and (c0 > o0) and (c0 > o1) and (o0 < c1):
+                logger.warning("Padrão de invalidação SHORT: Engulfing Bullish detectado")
+                return True
+
+            # Verificar RSI sobrevendido
+            if 'rsi' in df.columns and df['rsi'].iloc[-1] < 30:
+                logger.warning(f"Padrão de invalidação SHORT: RSI sobrevendido ({df['rsi'].iloc[-1]:.1f})")
+                return True
+
+            # Verificar %B muito baixo
+            if 'boll_pct_b' in df.columns and df['boll_pct_b'].iloc[-1] < 0.1:
+                logger.warning(f"Padrão de invalidação SHORT: %B extremamente baixo ({df['boll_pct_b'].iloc[-1]:.2f})")
+                return True
+
+        elif signal_direction == "LONG":
+            # Verifica padrão de reversão de alta (shooting star, engulfing bearish, etc)
+            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
+            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
+            h0, l0 = df['high'].iloc[-1], df['low'].iloc[-1]
+
+            # Shooting star/Doji com sombra superior longa
+            upper_wick = h0 - max(o0, c0)
+            body_size = abs(c0 - o0)
+            if (upper_wick > body_size * 2) and (c0 < o0):
+                logger.warning("Padrão de invalidação LONG: Shooting Star/Doji detectado")
+                return True
+
+            # Bearish engulfing
+            if (c1 > o1) and (c0 < o0) and (c0 < o1) and (o0 > c1):
+                logger.warning("Padrão de invalidação LONG: Engulfing Bearish detectado")
+                return True
+
+            # Verificar RSI sobrecomprado
+            if 'rsi' in df.columns and df['rsi'].iloc[-1] > 70:
+                logger.warning(f"Padrão de invalidação LONG: RSI sobrecomprado ({df['rsi'].iloc[-1]:.1f})")
+                return True
+
+            # Verificar %B muito alto
+            if 'boll_pct_b' in df.columns and df['boll_pct_b'].iloc[-1] > 0.9:
+                logger.warning(f"Padrão de invalidação LONG: %B extremamente alto ({df['boll_pct_b'].iloc[-1]:.2f})")
+                return True
+
+        return False
+
 
 class VolatilityPatternAnalyzer(TechnicalPatternAnalyzer):
     """

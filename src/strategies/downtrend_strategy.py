@@ -61,6 +61,20 @@ class DowntrendStrategy(BaseStrategy):
         if not self.verify_indicators(df):
             return False
 
+        # Adicionar filtro de RSI para evitar entradas em condições extremas
+        if 'rsi' in df.columns:
+            rsi = df['rsi'].iloc[-1]
+            if rsi < 30:  # Condição sobrevendida
+                logger.warning(f"RSI em condição sobrevendida ({rsi:.1f}) - evitando ativação da estratégia de baixa")
+                return False
+
+        # Adicionar filtro de %B para evitar entradas em condições extremas
+        if 'boll_pct_b' in df.columns:
+            pct_b = df['boll_pct_b'].iloc[-1]
+            if pct_b < 0.1:  # Preço muito próximo da banda inferior
+                logger.warning(f"Bollinger %B muito baixo ({pct_b:.2f}) - evitando ativação da estratégia de baixa")
+                return False
+
         # Verificar EMAs no timeframe atual
         ema_short = df['ema_short'].iloc[-1]
         ema_long = df['ema_long'].iloc[-1]
@@ -113,6 +127,20 @@ class DowntrendStrategy(BaseStrategy):
             ]
         )
 
+        # Adicionar filtro de RSI para evitar entradas em condições extremas
+        if 'rsi' in df.columns:
+            rsi = df['rsi'].iloc[-1]
+            if rsi < 30:  # Condição sobrevendida
+                logger.warning(f"RSI em condição sobrevendida ({rsi:.1f}) - evitando ativação da estratégia de baixa")
+                return False
+
+        # Adicionar filtro de %B para evitar entradas em condições extremas
+        if 'boll_pct_b' in df.columns:
+            pct_b = df['boll_pct_b'].iloc[-1]
+            if pct_b < 0.1:  # Preço muito próximo da banda inferior
+                logger.warning(f"Bollinger %B muito baixo ({pct_b:.2f}) - evitando ativação da estratégia de baixa")
+                return False
+
         # Ativar se tivermos confirmação em pelo menos 3 dos 6 indicadores
         # Aumentamos o número mínimo de confirmações para maior robustez
         should_activate = confirmations >= 3
@@ -126,10 +154,6 @@ class DowntrendStrategy(BaseStrategy):
 
         return should_activate
 
-
-
-
-
     async def generate_signal(self, df: pd.DataFrame, current_price: float, mtf_data: dict) -> TradingSignal | None:
         """
         Gera um sinal de trading para mercados em baixa.
@@ -140,6 +164,12 @@ class DowntrendStrategy(BaseStrategy):
         """
         # 1. Detectar rally (correção de alta) na tendência de baixa
         in_rally, rally_strength = self.trend_analyzer.detect_rally(df)
+
+        # Verificar se há padrão de invalidação para SHORT
+        invalidation_pattern = self.trend_analyzer.is_invalidation_pattern(df, "SHORT")
+        if invalidation_pattern:
+            logger.warning("Padrão de invalidação para SHORT detectado - sinal rejeitado")
+            return None
 
         # 2. Verificar resistência e possível rejeição
         near_resistance, resistance_strength = self.trend_analyzer.detect_resistance(df, current_price)
@@ -220,8 +250,8 @@ class DowntrendStrategy(BaseStrategy):
             entry_conditions_score = entry_conditions_score / weights_sum
 
         # Número mínimo de condições e score mínimo para gerar sinal
-        min_conditions = 2
-        min_score = 0.5
+        min_conditions = 3
+        min_score = 0.6
 
         conditions_count = sum(
             [in_rally, near_resistance, stoch_overbought,
@@ -338,7 +368,6 @@ class DowntrendStrategy(BaseStrategy):
             return signal
 
         return None
-
 
     def adjust_signal(self, signal: TradingSignal, df: pd.DataFrame, mtf_data: dict) -> TradingSignal:
         """

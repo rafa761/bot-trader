@@ -933,7 +933,7 @@ class LowVolatilityStrategy(BaseStrategy):
                 tight_range, low_volume, mtf_calm, mean_reversion_zone
             ]
         )
-        should_activate = confirmations >= 2
+        should_activate = confirmations >= 3
 
         if should_activate:
             logger.info(
