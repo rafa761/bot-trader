@@ -3,6 +3,7 @@
 import asyncio
 import signal
 import sys
+import threading
 from typing import Any, Literal
 
 from core.logger import logger
@@ -27,6 +28,8 @@ class CleanupHandler:
         self.symbol = symbol
         self.original_sigint_handler = None
         self.is_cleaning_up = False
+        # Armazenar loop principal para referência
+        self.main_loop = asyncio.get_running_loop() if asyncio.get_event_loop().is_running() else None
 
     def register(self) -> None:
         """
@@ -55,28 +58,35 @@ class CleanupHandler:
         self.is_cleaning_up = True
         logger.info("Interrupção detectada. Iniciando procedimento de limpeza...")
 
-        # Criar e executar a tarefa de limpeza
+        # Executar a limpeza em um novo thread para não bloquear o loop de eventos principal
+        cleanup_thread = threading.Thread(target=self._run_cleanup_in_new_loop)
+        cleanup_thread.daemon = True
+        cleanup_thread.start()
+        cleanup_thread.join()  # Aguardar a conclusão da limpeza antes de continuar
+
+        logger.info("Limpeza concluída. Encerrando o bot.")
+
+        # Chamar o manipulador original para encerrar o programa normalmente
+        if callable(self.original_sigint_handler):
+            self.original_sigint_handler(sig, frame)
+        else:
+            sys.exit(0)
+
+    def _run_cleanup_in_new_loop(self) -> None:
+        """
+        Cria um novo loop de eventos e executa a limpeza.
+        Esta função é executada em uma nova thread.
+        """
         try:
-            loop = asyncio.get_event_loop()
+            # Criar um novo loop para esta thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
 
-            # Se o loop estiver sendo fechado, criar um novo
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            # Executar a limpeza de forma síncrona (bloqueante)
-            loop.run_until_complete(self._cleanup())
-
+            # Executar a limpeza no novo loop
+            new_loop.run_until_complete(self._cleanup())
+            new_loop.close()
         except Exception as e:
-            logger.error(f"Erro durante a limpeza na interrupção: {e}")
-        finally:
-            logger.info("Limpeza concluída. Encerrando o bot.")
-
-            # Chamar o manipulador original para encerrar o programa normalmente
-            if callable(self.original_sigint_handler):
-                self.original_sigint_handler(sig, frame)
-            else:
-                sys.exit(0)
+            logger.error(f"Erro durante execução da limpeza: {e}", exc_info=True)
 
     async def _cleanup(self) -> None:
         """
@@ -135,21 +145,18 @@ class CleanupHandler:
                 # Quantidade absoluta (remover sinal)
                 quantity = abs(position_amt)
 
-                # Executar ordem para fechar a posição SEM o parâmetro reduceOnly
+                # Executar ordem para fechar a posição
                 try:
                     close_order = await self.client.client.futures_create_order(
                         symbol=self.symbol,
                         side=side,
                         positionSide=position_side,
                         type="MARKET",
-                        quantity=f"{quantity}"  # Removido reduceOnly=True
+                        quantity=f"{quantity}"
                     )
-
                     logger.info(f"Posição fechada: {position_side} {quantity} {self.symbol} - Ordem: {close_order}")
                 except Exception as order_error:
-                    # Tentar uma abordagem alternativa se a primeira falhar
                     logger.warning(f"Primeiro método falhou: {order_error}. Tentando método alternativo...")
-
                     try:
                         # Método alternativo: usar closePosition=True
                         close_order = await self.client.client.futures_create_order(
@@ -157,25 +164,11 @@ class CleanupHandler:
                             side=side,
                             positionSide=position_side,
                             type="MARKET",
-                            quantity=f"{quantity}",
-                            closePosition=True  # Usar closePosition em vez de reduceOnly
+                            closePosition=True
                         )
                         logger.info(f"Posição fechada (método alternativo): {position_side} {quantity} {self.symbol}")
                     except Exception as alt_error:
-                        logger.error(f"Erro ao usar método alternativo: {alt_error}")
-
-                        # Terceira tentativa: usar apenas quantidade, sem flags adicionais
-                        try:
-                            close_order = await self.client.client.futures_create_order(
-                                symbol=self.symbol,
-                                side=side,
-                                positionSide=position_side,
-                                type="MARKET",
-                                quantity=f"{quantity}"
-                            )
-                            logger.info(f"Posição fechada (método básico): {position_side} {quantity} {self.symbol}")
-                        except Exception as basic_error:
-                            logger.error(f"Falha em todos os métodos de fechamento de posição: {basic_error}")
+                        logger.error(f"Falha em todos os métodos de fechamento de posição: {alt_error}")
 
         except Exception as e:
             logger.error(f"Erro ao fechar posições: {e}")
