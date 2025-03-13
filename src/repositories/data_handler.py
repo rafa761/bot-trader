@@ -279,7 +279,7 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    ema_windows: tuple[int, int] = (3, 10)
+    ema_windows: tuple[int, int] = (3, 10, 50)
 
     # Hull Moving Average - excelente para day trading
     hull_window: int = 7
@@ -370,6 +370,11 @@ class TechnicalIndicatorAdder:
             df['ema_long'] = EMAIndicator(
                 close=df['close'],
                 window=config.ema_windows[1]
+            ).ema_indicator()
+
+            df['ema_50'] = EMAIndicator(
+                close=df['close'],
+                window=config.ema_windows[2]
             ).ema_indicator()
 
             # Hull Moving Average (HMA) - Mais rápida que EMA, menos lag

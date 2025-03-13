@@ -265,6 +265,11 @@ class DowntrendStrategy(BaseStrategy):
             f"Strong_Trend={strong_trend} ({trend_strength:.1f}), MTF_Aligned={mtf_aligned} ({mtf_strength:.1f})"
         )
 
+        if conditions_count >= min_conditions and entry_conditions_score < min_score:
+            logger.warning(
+                f"Score insuficiente para gerar sinal: {entry_conditions_score:.2f} < mínimo requerido {min_score:.2f}"
+            )
+
         # Decidir se geramos sinal baseado no número de condições e no score
         generate_signal = conditions_count >= min_conditions and entry_conditions_score >= min_score
 

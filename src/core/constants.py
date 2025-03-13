@@ -14,6 +14,7 @@ FEATURE_COLUMNS = [
     # Médias móveis
     "ema_short",
     "ema_long",
+    "ema_50",
     "hma",  # Hull MA - excelente para reduzir lag em timeframes curtos
 
     # Indicadores de tendência
@@ -76,15 +77,6 @@ FEATURE_COLUMNS = [
     "volatility_class",  # classificação de volatilidade
     "volume_ratio",  # volume comparado à média
     "volume_class",  # classificação de volume
-]
-
-# Definir também quais indicadores são categóricos (para one-hot encoding)
-CATEGORICAL_FEATURES = [
-    "market_phase",
-    "volatility_class",
-    "volume_class",
-    "trend_strength",
-    "supertrend_direction"
 ]
 
 # Define o caminho absoluto para a pasta de modelos treinados
