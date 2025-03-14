@@ -480,6 +480,7 @@ class HighVolatilityStrategy(BaseStrategy):
         # Log de condições
         logger.info(
             f"Score LONG: {long_score:.2f} (condições: {long_conditions_met}/{len(long_conditions)}) - "
+            f"Score SHORT: {short_score:.2f} (condições: {short_conditions_met}/{len(long_conditions)}) - "
             f"Breakout={long_conditions['breakout']} ({long_scores['breakout']:.2f}), "
             f"Momentum={long_conditions['momentum']} ({long_scores['momentum']:.2f}), "
             f"Reversão={long_conditions['reversal']} ({long_scores['reversal']:.2f}), "
@@ -607,7 +608,7 @@ class HighVolatilityStrategy(BaseStrategy):
             timestamp=datetime.now(),
             # Campos adicionais para gerenciamento de risco avançado
             mtf_trend=market_trend,
-            mtf_confidence=mtf_strength * 100 if mtf_strength else None,
+            mtf_confidence=mtf_strength if mtf_strength else None,
             mtf_alignment=signal_strength if signal_strength else None,
             mtf_details={
                 'entry_conditions_score': signal_strength,
@@ -932,7 +933,7 @@ class LowVolatilityStrategy(BaseStrategy):
                 tight_range, low_volume, mtf_calm, mean_reversion_zone
             ]
         )
-        should_activate = confirmations >= 2
+        should_activate = confirmations >= 3
 
         if should_activate:
             logger.info(
@@ -1175,7 +1176,7 @@ class LowVolatilityStrategy(BaseStrategy):
             timestamp=datetime.now(),
             # Campos adicionais para gerenciamento de risco avançado
             mtf_trend=market_trend,
-            mtf_confidence=mtf_neutral * 70 if mtf_neutral else None,  # Neutro é bom em baixa vol
+            mtf_confidence=mtf_neutral * 0.7 if mtf_neutral else None,  # Neutro é bom em baixa vol
             mtf_alignment=signal_strength if signal_strength else None,
             mtf_details={
                 'entry_conditions_score': signal_strength,

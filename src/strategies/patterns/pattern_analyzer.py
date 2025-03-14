@@ -613,6 +613,8 @@ class TrendPatternAnalyzer(TechnicalPatternAnalyzer):
             tuple[bool, float]: (pullback_detectado, força_do_pullback de 0 a 1)
         """
         pullback_strength = 0.0
+        pullback_valid = False
+        volume_signal = 0.0
 
         # Verificar RSI para pullback
         rsi_pullback = False
@@ -629,32 +631,83 @@ class TrendPatternAnalyzer(TechnicalPatternAnalyzer):
                 rsi_strength = min((50 - rsi) / 20, 1.0)  # Normalizar entre 0-1
                 logger.info(f"Pullback de RSI detectado: RSI={rsi:.1f} (força: {rsi_strength:.2f})")
 
-        # Verificar volume baixo durante pullback (sinal de fraqueza do pullback)
-        volume_signal = 0.0
-        if 'volume' in df.columns and len(df) > 5:
-            current_volume = df['volume'].iloc[-1]
-            avg_volume = df['volume'].iloc[-5:].mean()
+            # Em day trading 15min, RSI extremamente baixo frequentemente indica continuação de tendência baixista
+            if rsi < 20:
+                logger.warning(
+                    f"RSI extremamente baixo ({rsi:.1f}) - pode indicar tendência baixista forte, não apenas pullback"
+                )
+                rsi_pullback = False
 
-            if current_volume < avg_volume * 0.8:  # Volume baixo no pullback
-                volume_signal = 0.3  # Sinal positivo para entrada
-                logger.info(f"Volume baixo durante pullback: {current_volume:.0f} vs média {avg_volume:.0f}")
+        # Verificar formações de velas específicas para 15min
+        candle_reversal_signal = 0.0
+        if len(df) >= 3:
+            c_1, o_1 = df['close'].iloc[-1], df['open'].iloc[-1]  # Vela atual
+            c_2, o_2 = df['close'].iloc[-2], df['open'].iloc[-2]  # Vela anterior
+            c_3, o_3 = df['close'].iloc[-3], df['open'].iloc[-3]  # Vela anterior a anterior
 
-        # Verificar velas de baixa consecutivas (sinal de pullback)
-        candle_signal = 0.0
-        if len(df) > 3:
-            if (df['close'].iloc[-1] < df['open'].iloc[-1] and
-                    df['close'].iloc[-2] < df['open'].iloc[-2]):
-                candle_signal = 0.2
-                logger.info("Padrão de velas de baixa consecutivas detectado")
+            # Detectar padrão de exaustão (3 velas de baixa seguidas de uma de alta)
+            if (c_3 < o_3 and c_2 < o_2 and c_1 > o_1 and
+                    (c_1 - o_1) > abs(c_2 - o_2) * 1.2):  # Vela de alta atual mais forte que a anterior de baixa
+                candle_reversal_signal = 0.8
+                logger.info(
+                    f"Padrão de reversão detectado: 3 velas de baixa + 1 de alta com força (força: {candle_reversal_signal:.2f})"
+                )
+
+            # Verificar volume crescente na região de suporte
+            volume_signal = 0.0
+            if 'volume' in df.columns and len(df) > 3:
+                curr_volume = df['volume'].iloc[-1]
+                prev_volume = df['volume'].iloc[-2]
+
+                # Volume crescente em vela de alta após baixa = suporte
+                if curr_volume > prev_volume * 1.2 and df['close'].iloc[-1] > df['open'].iloc[-1]:
+                    volume_signal = 0.4
+                    logger.info(f"Volume crescente em vela de alta detectado: {curr_volume:.0f} vs {prev_volume:.0f}")
+
+        # Verificar proximidade com níveis específicos de 15 minutos
+        level_signal = 0.0
+        if 'ema_50' in df.columns:  # Verificar se temos a EMA 50 (suporte/resistência comum em 15min)
+            price = df['close'].iloc[-1]
+            ema_50 = df['ema_50'].iloc[-1]
+
+            # Preço próximo da EMA long por baixo (resistência)
+            distance_pct = abs(price - ema_50) / price * 100
+            if distance_pct < 0.2:  # Muito próximo da EMA long
+                level_signal = 0.5
+                logger.info(
+                    f"Preço próximo da EMA 50 (distância: {distance_pct:.2f}%) - suporte/resistência importante em 15min"
+                    )
 
         # Calcular a força total do pullback
         if rsi_pullback:
-            pullback_strength = rsi_strength + volume_signal + candle_signal
-            pullback_strength = min(pullback_strength, 1.0)  # Normalizar para máximo de 1.0
+            pullback_valid = True
+            pullback_strength = (
+                    rsi_strength * 0.4 +  # RSI: 40% de peso
+                    volume_signal * 0.2 +  # Volume: 20% de peso
+                    candle_reversal_signal * 0.3 +  # Padrão de velas: 30% de peso
+                    level_signal * 0.1  # Níveis: 10% de peso
+            )
 
-            return True, pullback_strength
+            # Requer pelo menos 2 confirmações para day trading 15min
+            confirmations = sum(
+                [
+                    rsi_strength > 0.5,
+                    volume_signal > 0,
+                    candle_reversal_signal > 0,
+                    level_signal > 0
+                ]
+            )
 
-        return False, 0.0
+            if confirmations < 2:
+                logger.warning(f"Pullback detectado mas sem confirmações suficientes ({confirmations}/2)")
+                pullback_valid = False
+            else:
+                logger.info(
+                    f"Pullback confirmado com {confirmations} confirmações. "
+                    f"Força: {pullback_strength:.2f}"
+                )
+
+        return pullback_valid, pullback_strength
 
     def detect_rally(self, df: pd.DataFrame) -> tuple[bool, float]:
         """
@@ -876,6 +929,78 @@ class TrendPatternAnalyzer(TechnicalPatternAnalyzer):
             return True, max_resistance
 
         return False, 0.0
+
+    def is_invalidation_pattern(self, df: pd.DataFrame, signal_direction: str) -> bool:
+        """
+        Verifica se existe padrão de invalidação para a direção do sinal.
+
+        Args:
+            df: DataFrame com dados históricos
+            signal_direction: "LONG" ou "SHORT"
+
+        Returns:
+            bool: True se um padrão de invalidação for detectado
+        """
+        if len(df) < 3:
+            return False
+
+        if signal_direction == "SHORT":
+            # Verifica padrão de reversão de baixa (hammer, engulfing bullish, etc)
+            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
+            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
+            h0, l0 = df['high'].iloc[-1], df['low'].iloc[-1]
+
+            # Hammer/Doji com sombra inferior longa
+            lower_wick = min(o0, c0) - l0
+            body_size = abs(c0 - o0)
+            if (lower_wick > body_size * 2) and (c0 > o0):
+                logger.warning("Padrão de invalidação SHORT: Hammer/Doji detectado")
+                return True
+
+            # Bullish engulfing
+            if (c1 < o1) and (c0 > o0) and (c0 > o1) and (o0 < c1):
+                logger.warning("Padrão de invalidação SHORT: Engulfing Bullish detectado")
+                return True
+
+            # Verificar RSI sobrevendido
+            if 'rsi' in df.columns and df['rsi'].iloc[-1] < 30:
+                logger.warning(f"Padrão de invalidação SHORT: RSI sobrevendido ({df['rsi'].iloc[-1]:.1f})")
+                return True
+
+            # Verificar %B muito baixo
+            if 'boll_pct_b' in df.columns and df['boll_pct_b'].iloc[-1] < 0.1:
+                logger.warning(f"Padrão de invalidação SHORT: %B extremamente baixo ({df['boll_pct_b'].iloc[-1]:.2f})")
+                return True
+
+        elif signal_direction == "LONG":
+            # Verifica padrão de reversão de alta (shooting star, engulfing bearish, etc)
+            c0, o0 = df['close'].iloc[-1], df['open'].iloc[-1]
+            c1, o1 = df['close'].iloc[-2], df['open'].iloc[-2]
+            h0, l0 = df['high'].iloc[-1], df['low'].iloc[-1]
+
+            # Shooting star/Doji com sombra superior longa
+            upper_wick = h0 - max(o0, c0)
+            body_size = abs(c0 - o0)
+            if (upper_wick > body_size * 2) and (c0 < o0):
+                logger.warning("Padrão de invalidação LONG: Shooting Star/Doji detectado")
+                return True
+
+            # Bearish engulfing
+            if (c1 > o1) and (c0 < o0) and (c0 < o1) and (o0 > c1):
+                logger.warning("Padrão de invalidação LONG: Engulfing Bearish detectado")
+                return True
+
+            # Verificar RSI sobrecomprado
+            if 'rsi' in df.columns and df['rsi'].iloc[-1] > 70:
+                logger.warning(f"Padrão de invalidação LONG: RSI sobrecomprado ({df['rsi'].iloc[-1]:.1f})")
+                return True
+
+            # Verificar %B muito alto
+            if 'boll_pct_b' in df.columns and df['boll_pct_b'].iloc[-1] > 0.9:
+                logger.warning(f"Padrão de invalidação LONG: %B extremamente alto ({df['boll_pct_b'].iloc[-1]:.2f})")
+                return True
+
+        return False
 
 
 class VolatilityPatternAnalyzer(TechnicalPatternAnalyzer):

@@ -23,8 +23,6 @@ class OrderCalculator(IOrderCalculator):
         """
         Calcula a quantidade a ser negociada com ajuste de volatilidade.
         """
-        # Copiar implementação de TradingStrategy.calculate_trade_quantity
-        # Mantendo a lógica atual
         risk_amount = capital * risk_per_trade
         original_risk = risk_amount
 

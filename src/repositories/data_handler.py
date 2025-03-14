@@ -279,28 +279,27 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    ema_windows: tuple[int, int] = (3, 10)  # Mais curtas para maior sensibilidade
+    ema_windows: tuple[int, int] = (3, 10, 50)
 
     # Hull Moving Average - excelente para day trading
-    hull_window: int = 7  # Reduzido para maior reatividade
+    hull_window: int = 7
 
     # Indicadores de volatilidade otimizados
-    bollinger_window: int = 14  # Reduzido para maior sensibilidade
-    bollinger_std: float = 2.0  # Mantido
-    atr_window: int = 10  # Reduzido para maior sensibilidade
+    bollinger_window: int = 14
+    bollinger_std: float = 2.0
+    atr_window: int = 10
 
     # Osciladores otimizados para day trading
-    rsi_window: int = 5  # Reduzido para maior sensibilidade
-    stoch_k_window: int = 7  # Reduzido para maior sensibilidade
-    stoch_d_window: int = 3  # Mantido
-    stoch_smooth_k: int = 2  # Menos suavização para maior reatividade
+    rsi_window: int = 5
+    stoch_k_window: int = 7
+    stoch_d_window: int = 3
+    stoch_smooth_k: int = 2
 
     # MACD otimizado para 15min
     macd_windows: tuple[int, int, int] = (12, 5, 7)  # Ajustado para maior sensibilidade
 
-    # Outros indicadores otimizados
-    vwap_window: int = 14  # Mantido
-    adx_window: int = 8  # Reduzido para maior sensibilidade
+    vwap_window: int = 14
+    adx_window: int = 8
 
     # Supertrend - crítico para day trading
     supertrend_atr_multiplier: float = 2.0  # Ajustado para ser mais reativo
@@ -371,6 +370,11 @@ class TechnicalIndicatorAdder:
             df['ema_long'] = EMAIndicator(
                 close=df['close'],
                 window=config.ema_windows[1]
+            ).ema_indicator()
+
+            df['ema_50'] = EMAIndicator(
+                close=df['close'],
+                window=config.ema_windows[2]
             ).ema_indicator()
 
             # Hull Moving Average (HMA) - Mais rápida que EMA, menos lag

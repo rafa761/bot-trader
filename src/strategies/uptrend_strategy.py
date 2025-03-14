@@ -66,6 +66,20 @@ class UptrendStrategy(BaseStrategy):
         if not self.verify_indicators(df):
             return False
 
+        # Adicionar filtro de RSI para evitar entradas em condições extremas
+        if 'rsi' in df.columns:
+            rsi = df['rsi'].iloc[-1]
+            if rsi > 70:  # Condição sobrecomprada
+                logger.warning(f"RSI em condição sobrecomprada ({rsi:.1f}) - evitando ativação da estratégia de alta")
+                return False
+
+        # Adicionar filtro de %B para evitar entradas em condições extremas
+        if 'boll_pct_b' in df.columns:
+            pct_b = df['boll_pct_b'].iloc[-1]
+            if pct_b > 0.9:  # Preço muito próximo da banda superior
+                logger.warning(f"Bollinger %B muito alto ({pct_b:.2f}) - evitando ativação da estratégia de alta")
+                return False
+
         # Verificar EMAs no timeframe atual
         ema_short = df['ema_short'].iloc[-1]
         ema_long = df['ema_long'].iloc[-1]
@@ -118,9 +132,7 @@ class UptrendStrategy(BaseStrategy):
             ]
         )
 
-        # Ativar se tivermos confirmação em pelo menos 3 dos 6 indicadores
-        # Aumentamos o número mínimo de confirmações para maior robustez
-        should_activate = confirmations >= 3
+        should_activate = confirmations >= 4
 
         if should_activate:
             logger.info(
@@ -157,6 +169,12 @@ class UptrendStrategy(BaseStrategy):
         """
         # 1. Detectar pullback (correção de baixa) na tendência de alta
         in_pullback, pullback_strength = self.trend_analyzer.detect_pullback(df)
+
+        # Verificar se há padrão de invalidação para LONG
+        invalidation_pattern = self.trend_analyzer.is_invalidation_pattern(df, "LONG")
+        if invalidation_pattern:
+            logger.warning("Padrão de invalidação para LONG detectado - sinal rejeitado")
+            return None
 
         # 2. Verificar suporte e possível bounce
         near_support, support_strength = self.trend_analyzer.detect_support(df, current_price)
@@ -237,8 +255,8 @@ class UptrendStrategy(BaseStrategy):
             entry_conditions_score = entry_conditions_score / weights_sum
 
         # Número mínimo de condições e score mínimo para gerar sinal
-        min_conditions = 2
-        min_score = 0.5
+        min_conditions = 3
+        min_score = 0.6
 
         conditions_count = sum(
             [in_pullback, near_support, stoch_oversold,
@@ -251,6 +269,11 @@ class UptrendStrategy(BaseStrategy):
             f"Stoch_Oversold={stoch_oversold} ({stoch_strength:.1f}), Divergência={divergence} ({divergence_strength:.1f}), "
             f"Strong_Trend={strong_trend} ({trend_strength:.1f}), MTF_Aligned={mtf_aligned} ({mtf_strength:.1f})"
         )
+
+        if conditions_count >= min_conditions and entry_conditions_score < min_score:
+            logger.warning(
+                f"Score insuficiente para gerar sinal: {entry_conditions_score:.2f} < mínimo requerido {min_score:.2f}"
+            )
 
         # Decidir se geramos sinal baseado no número de condições e no score
         generate_signal = conditions_count >= min_conditions and entry_conditions_score >= min_score
@@ -336,7 +359,7 @@ class UptrendStrategy(BaseStrategy):
                 timestamp=datetime.now(),
                 # Campos adicionais para gerenciamento de risco avançado
                 mtf_trend="UPTREND",
-                mtf_confidence=mtf_strength * 100 if mtf_strength else None,
+                mtf_confidence=mtf_strength if mtf_strength else None,
                 mtf_alignment=mtf_strength if mtf_strength else None,
                 mtf_details={
                     'entry_conditions_score': entry_conditions_score,
