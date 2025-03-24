@@ -30,8 +30,8 @@ class HighVolatilityStrategy(BaseStrategy):
         config = StrategyConfig(
             name="High Volatility Strategy",
             description="Estratégia otimizada para mercados com alta volatilidade",
-            min_rr_ratio=1.4,
-            entry_threshold=0.55,
+            min_rr_ratio=1.6,
+            entry_threshold=0.65,
             tp_adjustment=1.3,
             sl_adjustment=1.4,
             entry_aggressiveness=0.9,
@@ -778,8 +778,8 @@ class LowVolatilityStrategy(BaseStrategy):
         config = StrategyConfig(
             name="Low Volatility Strategy",
             description="Estratégia otimizada para mercados com baixa volatilidade",
-            min_rr_ratio=1.1,
-            entry_threshold=0.50,
+            min_rr_ratio=1.3,
+            entry_threshold=0.60,
             tp_adjustment=0.8,
             sl_adjustment=0.7,
             entry_aggressiveness=1.2,
