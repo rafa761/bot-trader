@@ -279,35 +279,35 @@ class DataCollector:
 class TechnicalIndicatorConfig(BaseModel):
     """Configuração otimizada para indicadores técnicos em day trading de 15 minutos"""
     # Médias móveis mais curtas e reativas
-    ema_windows: tuple[int, int] = (3, 10, 50)
+    ema_windows: tuple[int, int] = (5, 21, 50)
 
     # Hull Moving Average - excelente para day trading
-    hull_window: int = 7
+    hull_window: int = 9
 
     # Indicadores de volatilidade otimizados
-    bollinger_window: int = 14
+    bollinger_window: int = 20
     bollinger_std: float = 2.0
-    atr_window: int = 10
+    atr_window: int = 14
 
     # Osciladores otimizados para day trading
-    rsi_window: int = 5
-    stoch_k_window: int = 7
+    rsi_window: int = 14
+    stoch_k_window: int = 14
     stoch_d_window: int = 3
-    stoch_smooth_k: int = 2
+    stoch_smooth_k: int = 3
 
     # MACD otimizado para 15min
-    macd_windows: tuple[int, int, int] = (12, 5, 7)  # Ajustado para maior sensibilidade
+    macd_windows: tuple[int, int, int] = (26, 12, 9)
 
-    vwap_window: int = 14
-    adx_window: int = 8
+    vwap_window: int = 20
+    adx_window: int = 14
 
     # Supertrend - crítico para day trading
-    supertrend_atr_multiplier: float = 2.0  # Ajustado para ser mais reativo
-    supertrend_atr_period: int = 7  # Reduzido para maior sensibilidade
+    supertrend_atr_multiplier: float = 2.0
+    supertrend_atr_period: int = 10
 
     # Outros parâmetros
-    heikin_ashi_enabled: bool = True  # Manter - excelente para clareza em 15min
-    pivot_lookback: int = 3  # Reduzido para capturar pivôs mais recentes
+    heikin_ashi_enabled: bool = True
+    pivot_lookback: int = 5
 
 
 class TechnicalIndicatorAdder:
@@ -673,38 +673,38 @@ class LabelConfig(BaseModel):
     """Configuração otimizada para criação de labels em day trading de 15 minutos"""
     # Horizonte baseado na configuração existente
     base_horizon: int = Field(
-        6, gt=0,
+        4, gt=0,
         description="Horizonte de previsão base em períodos (do settings)"
     )
     min_horizon: int = Field(
-        4, gt=0,
+        3, gt=0,
         description="Horizonte mínimo para mercados voláteis"
     )
     max_horizon: int = Field(
-        10, gt=0,
+        7, gt=0,
         description="Horizonte máximo para mercados lentos"
     )
 
     # Configurações de movimento de preço
-    min_price_move: float = Field(0.35, description="Movimento mínimo percentual para considerar sinal")
+    min_price_move: float = Field(0.65, description="Movimento mínimo percentual para considerar sinal")
 
     # Take profit e stop loss
     base_rr_ratio: float = Field(
-        1.5,
+        2.2,
         description="Razão base entre take profit e stop loss (do settings)"
     )
     trend_rr_ratio: float = Field(
-        2.0,
+        2.5,
         description="Razão R:R otimizada para mercados em tendência"
     )
     range_rr_ratio: float = Field(
-        1.2,
+        1.5,
         description="Razão R:R otimizada para mercados em range"
     )
 
     # ATR para stops dinâmicos
     atr_sl_multiplier: float = Field(
-        1.5,
+        2.0,
         description="Multiplicador do ATR para stop loss (do settings)"
     )
 
@@ -719,12 +719,12 @@ class LabelConfig(BaseModel):
     )
 
     # Qualificadores de trade
-    max_sl_pct: float = Field(1.5, description="Máximo stop loss percentual para day trading")
-    min_tp_pct: float = Field(0.5, description="Mínimo take profit percentual para day trading")
+    max_sl_pct: float = Field(2.2, description="Máximo stop loss percentual para day trading")
+    min_tp_pct: float = Field(1.0, description="Mínimo take profit percentual para day trading")
 
     # Ajuste dos limiares de qualidade baseados nas configurações existentes
     quality_threshold: float = Field(
-        0.6,
+        0.72,
         description="Limiar de qualidade para considerar um trade válido"
     )
 
