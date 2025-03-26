@@ -262,7 +262,7 @@ class MultiTimeFrameTrendAnalyzer:
             DataFrame com indicadores adicionados
         """
         # Adicionar EMAs
-        df['ema_short'] = df['close'].ewm(span=8, adjust=False).mean()
+        df['ema_short'] = df['close'].ewm(span=5, adjust=False).mean()
         df['ema_long'] = df['close'].ewm(span=21, adjust=False).mean()
 
         # Adicionar ADX
