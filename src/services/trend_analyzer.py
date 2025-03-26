@@ -191,10 +191,10 @@ class MultiTimeFrameTrendAnalyzer:
 
         # Definir pesos para cada timeframe
         self.tf_weights = {
-            TimeFrame.MINUTE_15: 0.65,  # Mais relevante
-            TimeFrame.HOUR_1: 0.20,  # Relevante, mas menos que 15m
-            TimeFrame.HOUR_4: 0.10,  # Contexto secundário
-            TimeFrame.DAY_1: 0.05  # Apenas contexto de longo prazo
+            TimeFrame.HOUR_1: 0.65,  # Agora o mais relevante (timeframe primário)
+            TimeFrame.HOUR_4: 0.20,  # Contexto importante
+            TimeFrame.DAY_1: 0.10,  # Contexto de longo prazo (maior peso)
+            TimeFrame.MINUTE_15: 0.05  # Apenas para confirmação de curto prazo
         }
 
         # Cache de dados para cada timeframe
@@ -262,7 +262,7 @@ class MultiTimeFrameTrendAnalyzer:
             DataFrame com indicadores adicionados
         """
         # Adicionar EMAs
-        df['ema_short'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema_short'] = df['close'].ewm(span=5, adjust=False).mean()
         df['ema_long'] = df['close'].ewm(span=21, adjust=False).mean()
 
         # Adicionar ADX
@@ -333,13 +333,13 @@ class MultiTimeFrameTrendAnalyzer:
                 cache_age_seconds = now - timestamp
 
                 # Configurar tempo de expiração do cache com base no timeframe
-                if tf == TimeFrame.MINUTE_15 and cache_age_seconds > 300:  # 5 minutos
+                if tf == TimeFrame.HOUR_1 and cache_age_seconds > 900:  # 15 minutos (mais frequente por ser primário)
                     need_refresh = True
-                elif tf == TimeFrame.HOUR_1 and cache_age_seconds > 1800:  # 30 minutos
+                elif tf == TimeFrame.HOUR_4 and cache_age_seconds > 3600:  # 1 hora
                     need_refresh = True
-                elif tf == TimeFrame.HOUR_4 and cache_age_seconds > 7200:  # 2 horas
+                elif tf == TimeFrame.DAY_1 and cache_age_seconds > 14400:  # 4 horas
                     need_refresh = True
-                elif tf == TimeFrame.DAY_1 and cache_age_seconds > 21600:  # 6 horas
+                elif tf == TimeFrame.MINUTE_15 and cache_age_seconds > 300:  # 5 minutos (mantido)
                     need_refresh = True
 
             if need_refresh:
@@ -519,23 +519,40 @@ class MultiTimeFrameTrendAnalyzer:
         trend, confidence, details = await self.analyze_multi_timeframe_trend()
         trend_score = details['trend_score']
 
-        # Analisar apenas o timeframe de 15m para low-latency trading
-        tf_15m_score = 0
-        if '15m' in details['tf_summary']:
-            tf_15m_data = details['tf_summary']['15m']
-            if tf_15m_data['strength'] == 'STRONG_UPTREND' or tf_15m_data['strength'] == 'MODERATE_UPTREND':
-                tf_15m_score = 0.8  # Forte tendência de alta em 15m
-            elif tf_15m_data['strength'] == 'WEAK_UPTREND':
-                tf_15m_score = 0.6  # Tendência fraca de alta em 15m
-            elif tf_15m_data['strength'] == 'STRONG_DOWNTREND' or tf_15m_data['strength'] == 'MODERATE_DOWNTREND':
-                tf_15m_score = -0.8  # Forte tendência de baixa em 15m
-            elif tf_15m_data['strength'] == 'WEAK_DOWNTREND':
-                tf_15m_score = -0.6  # Tendência fraca de baixa em 15m
-            else:
-                tf_15m_score = 0  # Neutro
+        # Analisar o timeframe de 1h (principal) e 4h (confirmação)
+        tf_1h_score = 0
+        tf_4h_score = 0
 
-        # Calcular alinhamento com mais peso para o timeframe de 15m
-        combined_score = trend_score * 0.5 + tf_15m_score * 0.5
+        # Analisar 1h (principal)
+        if '1h' in details['tf_summary']:
+            tf_1h_data = details['tf_summary']['1h']
+            if tf_1h_data['strength'] == 'STRONG_UPTREND' or tf_1h_data['strength'] == 'MODERATE_UPTREND':
+                tf_1h_score = 0.8  # Forte tendência de alta em 1h
+            elif tf_1h_data['strength'] == 'WEAK_UPTREND':
+                tf_1h_score = 0.6  # Tendência fraca de alta em 1h
+            elif tf_1h_data['strength'] == 'STRONG_DOWNTREND' or tf_1h_data['strength'] == 'MODERATE_DOWNTREND':
+                tf_1h_score = -0.8  # Forte tendência de baixa em 1h
+            elif tf_1h_data['strength'] == 'WEAK_DOWNTREND':
+                tf_1h_score = -0.6  # Tendência fraca de baixa em 1h
+            else:
+                tf_1h_score = 0  # Neutro
+
+        # Analisar 4h (confirmação)
+        if '4h' in details['tf_summary']:
+            tf_4h_data = details['tf_summary']['4h']
+            if tf_4h_data['strength'] == 'STRONG_UPTREND' or tf_4h_data['strength'] == 'MODERATE_UPTREND':
+                tf_4h_score = 0.75  # Forte tendência de alta em 4h
+            elif tf_4h_data['strength'] == 'WEAK_UPTREND':
+                tf_4h_score = 0.5  # Tendência fraca de alta em 4h
+            elif tf_4h_data['strength'] == 'STRONG_DOWNTREND' or tf_4h_data['strength'] == 'MODERATE_DOWNTREND':
+                tf_4h_score = -0.75  # Forte tendência de baixa em 4h
+            elif tf_4h_data['strength'] == 'WEAK_DOWNTREND':
+                tf_4h_score = -0.5  # Tendência fraca de baixa em 4h
+            else:
+                tf_4h_score = 0  # Neutro
+
+        # Calcular alinhamento com mais peso para o timeframe de 1h e confirmação de 4h
+        combined_score = trend_score * 0.3 + tf_1h_score * 0.5 + tf_4h_score * 0.2
 
         # Calcular alinhamento (-1 a 1, onde 1 é perfeitamente alinhado)
         if trade_direction == "LONG":
