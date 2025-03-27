@@ -15,6 +15,7 @@ class TimeFrame(str, Enum):
     HOUR_1 = "1h"
     HOUR_4 = "4h"
     DAY_1 = "1d"
+    WEEK_1 = "1w"
 
 
 class TrendStrength(str, Enum):
@@ -183,10 +184,10 @@ class MultiTimeFrameTrendAnalyzer:
         self.client = binance_client
         self.symbol = symbol
         self.timeframes = [
-            TimeFrame.MINUTE_15,
             TimeFrame.HOUR_1,
             TimeFrame.HOUR_4,
-            TimeFrame.DAY_1
+            TimeFrame.DAY_1,
+            TimeFrame.WEEK_1,
         ]
 
         # Definir pesos para cada timeframe
@@ -194,7 +195,7 @@ class MultiTimeFrameTrendAnalyzer:
             TimeFrame.HOUR_1: 0.65,  # Agora o mais relevante (timeframe primário)
             TimeFrame.HOUR_4: 0.20,  # Contexto importante
             TimeFrame.DAY_1: 0.10,  # Contexto de longo prazo (maior peso)
-            TimeFrame.MINUTE_15: 0.05  # Apenas para confirmação de curto prazo
+            TimeFrame.WEEK_1: 0.05  # Contexto longo prazo
         }
 
         # Cache de dados para cada timeframe
@@ -339,7 +340,7 @@ class MultiTimeFrameTrendAnalyzer:
                     need_refresh = True
                 elif tf == TimeFrame.DAY_1 and cache_age_seconds > 14400:  # 4 horas
                     need_refresh = True
-                elif tf == TimeFrame.MINUTE_15 and cache_age_seconds > 300:  # 5 minutos (mantido)
+                elif tf == TimeFrame.WEEK_1 and cache_age_seconds > 300:  # 5 minutos
                     need_refresh = True
 
             if need_refresh:
