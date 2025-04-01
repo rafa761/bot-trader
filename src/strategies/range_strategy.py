@@ -30,7 +30,7 @@ class RangeStrategy(BaseStrategy):
             name="Range Strategy",
             description="Estratégia otimizada para mercados laterais (em range)",
             min_rr_ratio=1.4,
-            entry_threshold=0.55,
+            entry_threshold=0.50,
             tp_adjustment=0.85,
             sl_adjustment=0.85,
             entry_aggressiveness=0.95,
